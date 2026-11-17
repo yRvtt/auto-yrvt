@@ -1,44 +1,208 @@
-# MIR4 Bot
+<div align="center">
+  <img src="docs/logo.png" width="110" alt="Auto yRvt">
+  <h1>Auto yRvt</h1>
+  <p><strong>Automação multi-conta para MIR4 no PC</strong><br>
+  Interface moderna, perfis, macros graváveis e grade de janelas.</p>
 
-Manda teclas direto pra janela do MIR4 com `PostMessage` — **não tira o foco**,
-pode usar o PC normalmente com o jogo atrás de outras janelas.
+  <p>
+    <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
+    <img alt="Windows" src="https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows">
+    <img alt="MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-2ea44f">
+    <a href="../../releases"><img alt="Release" src="https://img.shields.io/github/v/release/yRvtt/auto-yrvt?color=f2b45c"></a>
+  </p>
+</div>
 
-## Uso
+> [!WARNING]
+> A política do MIR4 proíbe automação de gameplay. Este projeto é para estudo
+> e uso em conta descartável. Contas flagradas podem ser banidas. Não afiliado
+> à Wemade/MIR4.
 
-1. Baixe `MIR4Bot.exe` na aba [Releases](../../releases).
-2. Abra o jogo, depois o exe (ele pede admin — necessário pro Windows entregar as mensagens).
-3. Ligue os toggles: **Acordar** (R → Tab → PageDown x3 → F), **Auto-Farm**, **Auto-Buff**.
-4. Se quiser conferir se o jogo aceita, use **Testar tecla** com `1`.
+## Screenshots
 
-Se o jogo não reagir, ele lê teclado por Raw Input e ignora mensagens postadas.
+| Contas | Tarefas |
+| --- | --- |
+| ![Contas](docs/screenshots/contas.png) | ![Tarefas](docs/screenshots/tarefas.png) |
 
-## Câmaras (XP 1 / XP 2 / XP 3 / Anti-Demônio)
+| Layout | Câmaras |
+| --- | --- |
+| ![Layout](docs/screenshots/layout.png) | ![Câmaras](docs/screenshots/camaras.png) |
 
-Clica no botão azul **Amovível** até o nome da sala bater com a referência salva.
+## Por que Auto yRvt?
 
-Treinar uma vez (a ordem importa):
+- **Multiconta de verdade**: uma instância por janela `Mir4G[...]`, com iniciar,
+  pausar e parar individual.
+- **Perfis por conta**: modo, intervalos, macros e pontos de câmara separados.
+- **Macros graváveis**: doar clã e comprar Intensify sem coordenada fixa.
+- **Interface agradável**: tema escuro, cards, toasts e animações leves.
+- **Launcher PC**: abre Game 1/Game 2 com UIAutomation.
+- **Câmaras por imagem**: XP 1, XP 2, XP 3 e Anti-Demônio.
+
+## Funcionalidades
+
+- **Contas** em cards com status pulsando e ações rápidas.
+- **Modos**: Farm EXP com Ultimate, Missão Q, Summon Boss e Acordar.
+- **Extras**: Auto-Buff, Doar clã e Comprar Intensify.
+- **Perfis** vinculados pelo título da janela.
+- **Grade de janelas** com preview visual.
+- **Busca de câmaras** por recorte de imagem.
+- **Launcher / UIAutomation** com fallback para PostMessage.
+- **Pânico F12** e parada de tudo.
+- **Auto-update** via GitHub Releases.
+- Migração automática da configuração antiga do MIR4 Bot.
+
+## Instalação
+
+Requisitos: Windows 10/11, Python 3.10+ e o jogo aberto.
+
+```bat
+git clone https://github.com/yRvtt/auto-yrvt.git
+cd auto-yrvt
+pip install -r requirements.txt
+python run.py
+```
+
+Ou baixe o `AutoYrvt.exe` na aba [Releases](../../releases).
+O exe pede administrador — necessário para o Windows entregar as mensagens à
+janela do jogo.
+
+## Uso rápido
+
+1. Abra o MIR4 (uma ou mais janelas).
+2. Abra o Auto yRvt e clique em **Atualizar**.
+3. Selecione a conta na lista.
+4. Crie/aplique um **perfil** (ex.: `conta1`) para vincular aquele título.
+5. Escolha o **modo** e ajuste o intervalo.
+6. Clique em **Salvar** e depois em **Iniciar** (ou **Iniciar todas**).
+
+A navegação fica na barra lateral: **Contas**, **Tarefas**, **Layout**,
+**Câmaras**, **Launcher** e **Ajustes**. O registro fica no rodapé.
+
+## Modos
+
+| Modo | Sequência | Intervalo padrão |
+| --- | --- | --- |
+| Farm EXP | `Tab` → `Down` → `F` (+ `R` com Ultimate) | 4 s |
+| Missão Q | `Q`/`E` → `T` x3 → 5 cliques no centro | 8 s |
+| Summon Boss | `E` | 10 s |
+| Acordar | `R` → menu → `Tab` → `PageDown` x3 → `F` | 3,8 s |
+
+O modo é exclusivo. Buff e macros rodam entre os ciclos.
+
+## Macros: doar clã e Intensify
+
+As coordenadas mudam com resolução, cliente e layout. Por isso as macros são
+**gravadas uma vez por perfil**:
+
+1. Selecione a conta e abra a tela inicial do fluxo no jogo.
+2. **Tarefas → Gravar** na linha **Doar clã** ou **Comprar Intensify**.
+3. Espere os 3 s.
+4. Faça a ação normalmente.
+5. Pressione **F9** para parar.
+
+A macro guarda cliques em coordenadas relativas e tempos; o campo **repetir**
+executa várias vezes (Intensify já vem com 4). Use **Testar** com a conta parada.
+
+## Multiconta, perfis e grade
+
+- **Atualizar** lista todas as janelas `Mir4G`.
+- Selecione uma conta, escolha o perfil e clique em **Aplicar**. O vínculo é
+  salvo pelo título (`Mir4G[0]`, `Mir4G[1]`, ...).
+- **Novo** cria um perfil; **Excluir** remove (o `default` é protegido).
+- **Iniciar todas** sobe o modo/extras de cada conta.
+- **Layout** aplica uma grade `linhas x colunas` em todas as janelas.
+
+Para evitar duas contas dividindo o mesmo perfil, vincule cada janela ao seu
+próprio perfil.
+
+## Launcher PC / UIAutomation
+
+1. Informe o caminho do launcher (ou uma URL `steam://...`).
+2. Informe parte do título da janela do launcher (padrão `MIR4`).
+3. Capture as coordenadas de **Game 1** e **Game 2**.
+4. Clique em **Abrir 2 clientes (UIA)**.
+
+Com `pywinauto`, o bot tenta invocar os botões por UIAutomation; se não achar,
+cai para clique via `PostMessage`.
+
+## Câmaras
 
 1. Abra a tela das câmaras no jogo.
-2. **Ponto Amovível** → clique e em 3s ponha o mouse sobre o botão azul.
-3. **Ponto Nome** → clique e em 3s ponha o mouse no **começo** do texto do nome da sala
-   (ex: `[6F] Câmara de Experiência II`). O recorte é de 340x26 px a partir desse ponto.
-4. **Ponto Entrar** → onde clicar pra entrar na sala depois de achar.
-5. **Salvar** na linha da sala desejada **enquanto ela está na tela** (repita para cada uma).
-6. **Procurar** na linha da sala. **Parar** interrompe.
+2. Capture **Ponto Amovível**, **Ponto Nome** e **Ponto Entrar**.
+3. Salve a referência de cada sala enquanto ela aparece.
+4. Use **Procurar**. A busca pausa a conta para não misturar cliques.
 
-Tudo fica salvo em `%APPDATA%\MIR4Bot\salas.json` — só treina uma vez.
-A captura usa `PrintWindow`, então funciona com o jogo atrás de outras janelas (não minimizado).
+A captura usa `PrintWindow`; o jogo pode ficar atrás de outras janelas, mas não
+minimizado.
 
-## Atualização
+## Configuração e migração
 
-O app checa sozinho o último release ao abrir; clique na versão no canto pra checar na hora.
-Se houver versão nova, ele baixa, troca o exe e reinicia.
+Tudo fica em:
 
-## Publicar uma versão nova
+```text
+%APPDATA%\AutoYrvt\state.json
+```
 
-1. Suba a versão em `APP_VERSION` (`mir4_bot.py`) e em `updater.py` não muda nada.
-2. `git add -A && git commit -m "v1.0.1" && git tag v1.0.1 && git push --tags`
-3. A Action `.github/workflows/release.yml` compila e anexa o exe no release.
-4. Os usuários recebem no próximo abrir (ou clicando na versão).
+Na primeira execução, o Auto yRvt copia `%APPDATA%\MIR4Bot\state.json` se
+existir; senão importa os pontos/referências de `%APPDATA%\MIR4Bot\salas.json`.
+O arquivo antigo não é apagado.
 
-Build local: `build.bat` → `dist\MIR4Bot.exe`.
+Para usar outra pasta (testes/portátil):
+
+```bat
+set AUTO_YRVT_CONFIG_DIR=C:\caminho\config
+python run.py
+```
+
+## Estrutura
+
+```text
+auto_yrvt/
+  __main__.py       entrada e DPI
+  core.py           janelas, teclas, captura, perfis, macros, instâncias
+  ui.py             interface Tkinter e animações
+  updater.py        auto-update GitHub
+  resources/        ícone
+tests/              testes do núcleo
+docs/               arquitetura e screenshots
+run.py              atalho de execução
+build.bat           gera dist\AutoYrvt.exe
+```
+
+Detalhes de arquitetura em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Desenvolvimento
+
+```bat
+python run.py
+python -m unittest discover -s tests -v
+build.bat
+```
+
+O build gera `dist\AutoYrvt.exe` com PyInstaller onefile, ícone e UAC admin.
+O workflow de release compila em tags `v*` e anexa o exe.
+
+## Roadmap
+
+- [ ] Presets de macro por resolução.
+- [ ] OCR para nomes de sala sem imagem de referência.
+- [ ] Mais modos de farm e prioridade por conta.
+- [ ] Exportar/importar perfis.
+- [ ] Temas claros/escuros.
+
+Tem uma ideia? Abra uma issue.
+
+## Contribuindo
+
+Leia [CONTRIBUTING.md](CONTRIBUTING.md). PRs pequenos, com teste e descrição do
+que foi validado no jogo, são muito bem-vindos.
+
+## Licença
+
+MIT — veja [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+  <sub>Feito por <a href="https://github.com/yRvtt">yRvtt</a>.
+  Se o projeto te ajudar, deixa uma ⭐ — isso ajuda o repositório a aparecer.</sub>
+</div>

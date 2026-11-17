@@ -1,7 +1,7 @@
 """
 Auto-update via GitHub Releases.
 
-O app só checa/download no exe (PyInstaller). Em dev (python mir4_bot.py)
+O app só checa/download no exe (PyInstaller). Em dev (python run.py)
 as funções retornam sem fazer nada.
 """
 
@@ -14,9 +14,9 @@ import urllib.request
 
 # ── configure aqui o repo ────────────────────────────────────────
 OWNER = "yRvtt"
-REPO = "mir4-bot"
+REPO = "auto-yrvt"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest"
-UA = "mir4-bot-updater"
+UA = "auto-yrvt-updater"
 TIMEOUT = 15
 
 
@@ -68,9 +68,9 @@ def download_and_restart(url, log=None):
 
     log = log or (lambda m: None)
     exe = os.path.abspath(sys.executable)
-    tmpdir = tempfile.gettempdir()
-    new_exe = os.path.join(tmpdir, "mir4bot_new.exe")
-    bat = os.path.join(tmpdir, "mir4bot_update.bat")
+    tmpdir = tempfile.mkdtemp(prefix="auto_yrvt_update_")
+    new_exe = os.path.join(tmpdir, "auto_yrvt_new.exe")
+    bat = os.path.join(tmpdir, "auto_yrvt_update.bat")
 
     log("Baixando atualização...")
     req = urllib.request.Request(url, headers={"User-Agent": UA})

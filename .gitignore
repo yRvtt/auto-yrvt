@@ -1,5 +1,11 @@
 __pycache__/
 build/
 dist/
+dist_test/
 *.spec
 *.pyc
+*.log
+.venv/
+venv/
+.vscode/
+.idea/
