@@ -4,14 +4,17 @@ MIR4 Bot — manda teclas pra janela do MIR4 sem tirar o foco (PostMessage).
 Pode usar o PC normalmente enquanto o bot roda.
 """
 
+import base64
+import ctypes
+import ctypes.wintypes
+import json
+import os
 import random
 import sys
 import threading
 import time
 import tkinter as tk
 from tkinter import messagebox
-
-import ctypes
 
 import updater
 
@@ -23,7 +26,7 @@ except ImportError:
     print("pip install pywin32")
     sys.exit(1)
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 MAPVK_VSC_TO_VK_EX = 3
 user32 = ctypes.windll.user32
@@ -71,24 +74,6 @@ def post_key(hwnd, scan, up=False, ext=False):
         return False
 
 
-def force_foreground(hwnd):
-    try:
-        fg = user32.GetForegroundWindow()
-        if fg == hwnd:
-            return True
-        fg_tid = user32.GetWindowThreadProcessId(fg, None)
-        tid = user32.GetWindowThreadProcessId(hwnd, None)
-        if fg_tid != tid:
-            user32.AttachThreadInput(fg_tid, tid, True)
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        user32.SetForegroundWindow(hwnd)
-        if fg_tid != tid:
-            user32.AttachThreadInput(fg_tid, tid, False)
-        return user32.GetForegroundWindow() == hwnd
-    except Exception:
-        return False
-
-
 MIR4_TITLE = "Mir4G"
 
 
@@ -115,6 +100,88 @@ def is_admin():
         return False
 
 
+# ── Captura da janela / clique ───────────────────────────────────
+gdi32 = ctypes.windll.gdi32
+
+ROOM_W, ROOM_H = 340, 26          # recorte do nome da sala (px)
+ROOM_MATCH = 15                   # score máx. pra considerar "é a sala"
+REFRESH_WAIT = 1.0                # tempo pro jogo trocar de sala
+
+ROOMS = [("xp1", "XP 1"), ("xp2", "XP 2"), ("xp3", "XP 3"), ("anti", "Anti-Demônio")]
+
+CFG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "MIR4Bot")
+CFG_FILE = os.path.join(CFG_DIR, "salas.json")
+
+
+class BMI(ctypes.Structure):
+    _fields_ = [("biSize", ctypes.wintypes.DWORD), ("biWidth", ctypes.wintypes.LONG),
+                ("biHeight", ctypes.wintypes.LONG), ("biPlanes", ctypes.wintypes.WORD),
+                ("biBitCount", ctypes.wintypes.WORD), ("biCompression", ctypes.wintypes.DWORD),
+                ("biSizeImage", ctypes.wintypes.DWORD), ("biXPelsPerMeter", ctypes.wintypes.LONG),
+                ("biYPelsPerMeter", ctypes.wintypes.LONG), ("biClrUsed", ctypes.wintypes.DWORD),
+                ("biClrImportant", ctypes.wintypes.DWORD)]
+
+
+def grab(hwnd):
+    """(w, h, pixels BGRA bottom-up) da área cliente, mesmo coberta por outras janelas."""
+    r = ctypes.wintypes.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(r)):
+        return None
+    w, h = r.right, r.bottom
+    if w <= 0 or h <= 0:
+        return None
+    hdc = user32.GetDC(hwnd)
+    mem = gdi32.CreateCompatibleDC(hdc)
+    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    gdi32.SelectObject(mem, bmp)
+    ok = user32.PrintWindow(hwnd, mem, 2)  # PW_RENDERFULLCONTENT
+    bmi = BMI()
+    bmi.biSize = ctypes.sizeof(BMI)
+    bmi.biWidth, bmi.biHeight = w, h
+    bmi.biPlanes, bmi.biBitCount = 1, 32
+    buf = ctypes.create_string_buffer(w * h * 4)
+    gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), 0)
+    gdi32.DeleteObject(bmp)
+    gdi32.DeleteDC(mem)
+    user32.ReleaseDC(hwnd, hdc)
+    return (w, h, buf.raw) if ok else None
+
+
+def crop(w, h, data, x, y, cw=ROOM_W, ch=ROOM_H):
+    x = max(0, min(x, w - 1))
+    y = max(0, min(y, h - 1))
+    cw, ch = min(cw, w - x), min(ch, h - y)
+    out = b"".join(data[(h - 1 - row) * w * 4 + x * 4:][:cw * 4] for row in range(y, y + ch))
+    return out
+
+
+def diff(a, b):
+    """diferença média (0-255) amostrando 1 a cada 13 bytes"""
+    if not a or len(a) != len(b):
+        return 999.0
+    idx = range(0, len(a), 13)
+    return sum(abs(a[i] - b[i]) for i in idx) / len(idx)
+
+
+def is_black(data):
+    return not any(data[0:len(data):997])
+
+
+def click_at(hwnd, x, y):
+    lp = (int(y) << 16) | int(x)
+    win32api.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lp)
+    time.sleep(0.03)
+    win32api.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lp)
+    time.sleep(0.05)
+    win32api.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, lp)
+    return True
+
+
+def client_point(hwnd):
+    x, y = win32api.GetCursorPos()
+    return win32gui.ScreenToClient(hwnd, (x, y))
+
+
 # ── Bot ──────────────────────────────────────────────────────────
 class Bot:
     def __init__(self, log_fn):
@@ -124,6 +191,11 @@ class Bot:
         self.flags = {"acordar": False, "farm": False, "buff": False}
         self.buff_keys = ["1", "2", "3"]
         self.buff_interval = 180
+        self.pts = {"amovivel": None, "nome": None, "entrar": None}
+        self.refs = {}
+        self.search_stop = threading.Event()
+        self.searching = None
+        self.load_cfg()
 
     def _ensure_hwnd(self):
         if not self.hwnd or not win32gui.IsWindow(self.hwnd):
@@ -156,6 +228,77 @@ class Bot:
     def start(self):
         for fn in (self._acordar_loop, self._farm_loop, self._buff_loop):
             threading.Thread(target=fn, daemon=True).start()
+
+    # ── Câmaras: config salva em %APPDATA%\MIR4Bot ───────────────
+    def load_cfg(self):
+        try:
+            with open(CFG_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            return
+        for k, v in (d.get("pts") or {}).items():
+            if k in self.pts and v:
+                self.pts[k] = tuple(v)
+        self.refs = {k: base64.b64decode(v) for k, v in (d.get("refs") or {}).items()}
+
+    def save_cfg(self):
+        os.makedirs(CFG_DIR, exist_ok=True)
+        d = {"pts": self.pts,
+             "refs": {k: base64.b64encode(v).decode() for k, v in self.refs.items()}}
+        with open(CFG_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+
+    def salvar_sala(self, room):
+        """Guarda o recorte atual como referência da sala (treino)."""
+        if not self._ensure_hwnd() or not self.pts["nome"]:
+            self.log("[sala] capture o ponto do nome primeiro")
+            return False
+        f = grab(self.hwnd)
+        if not f or is_black(f[2]):
+            self.log("[sala] captura preta — jogo minimizado?")
+            return False
+        self.refs[room] = crop(f[0], f[1], f[2], *self.pts["nome"])
+        self.save_cfg()
+        self.log(f"[sala] referência salva: {room}")
+        return True
+
+    def buscar_sala(self, room):
+        """Clica no Amovível até o nome bater com a referência da sala."""
+        self.searching = room
+        self.search_stop.clear()
+        try:
+            if not self.pts["amovivel"] or not self.pts["nome"]:
+                self.log("[sala] faltam pontos (Amovível / Nome)")
+                return
+            if room not in self.refs:
+                self.log(f"[sala] salve a referência de {room} primeiro")
+                return
+            n = 0
+            while (not self.search_stop.is_set() and self.searching == room
+                   and not self.stop.is_set()):
+                if not self._ensure_hwnd():
+                    time.sleep(1)
+                    continue
+                n += 1
+                click_at(self.hwnd, *self.pts["amovivel"])
+                time.sleep(REFRESH_WAIT)
+                f = grab(self.hwnd)
+                if not f or is_black(f[2]):
+                    self.log("[sala] captura preta — jogo minimizado?")
+                    return
+                score = diff(crop(f[0], f[1], f[2], *self.pts["nome"]), self.refs[room])
+                if score <= ROOM_MATCH:
+                    if self.pts["entrar"]:
+                        click_at(self.hwnd, *self.pts["entrar"])
+                    self.log(f"[sala] {room} achada em {n} tentativas (score {score:.0f})")
+                    return
+                if n <= 3 or n % 10 == 0:
+                    self.log(f"[sala] tentativa {n}: score {score:.0f}")
+                time.sleep(0.3)
+        finally:
+            if self.searching == room:
+                self.searching = None
+
 
     # ── Acordar (Tributação) ─────────────────────────────────────
     def _acordar_loop(self):
@@ -270,6 +413,8 @@ class App(tk.Tk):
         hdr.pack(fill="x")
         tk.Label(hdr, text="MIR4 Bot", bg=BG, fg=BLUE,
                  font=("Segoe UI", 18, "bold")).pack(side="left")
+        tk.Label(hdr, text=" background ", bg=GREEN, fg=BG,
+                 font=("Segoe UI", 7, "bold")).pack(side="left", padx=(8, 0))
         self.dot = tk.Label(hdr, text="●", bg=BG, fg=RED, font=("Segoe UI", 14))
         self.dot.pack(side="right")
         self.lbl_ver = tk.Label(hdr, text=f"v{APP_VERSION}", bg=BG, fg="#565f89",
@@ -284,6 +429,7 @@ class App(tk.Tk):
                  bg=BG, fg=ORANGE, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 8))
 
         self.toggles = {}
+        self._section(m, "AUTOMAÇÕES")
         for key, label, desc in [
             ("acordar", "Acordar", "Tributação: R → Tab → PageDown x3 → F"),
             ("farm", "Auto-Farm", "Loop: ataque (F) + coleta (R)"),
@@ -305,13 +451,39 @@ class App(tk.Tk):
         for text, color, cmd in [
             ("Tudo ON", GREEN, self._all_on),
             ("Tudo OFF", RED, self._all_off),
-            ("Focar MIR4", BLUE, self._focus),
         ]:
             tk.Button(ctrl, text=text, bg=color, fg=BG, relief="flat",
                       font=("Segoe UI", 9, "bold"), padx=10, pady=2,
                       activebackground=color, command=cmd).pack(side="left", padx=(0, 5))
 
+        # ── Câmaras ──────────────────────────────────────────────
+        self._section(m, "CÂMARAS — clica no Amovível até achar")
+        self.room_btns = {}
+        for key, label in ROOMS:
+            row = tk.Frame(m, bg=BG2, padx=10, pady=4)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, bg=BG2, fg=FG, font=FONTS, width=12,
+                     anchor="w").pack(side="left")
+            self.room_btns[key] = tk.Button(
+                row, text="Procurar", bg=BLUE, fg=BG, relief="flat", bd=0,
+                font=("Segoe UI", 8, "bold"), padx=10, pady=2,
+                command=lambda k=key: self._search(k))
+            self.room_btns[key].pack(side="right", padx=(4, 0))
+            tk.Button(row, text="Salvar", bg=BG3, fg=FG, relief="flat", bd=0,
+                      font=("Segoe UI", 8), padx=6, pady=2,
+                      command=lambda k=key: self.bot.salvar_sala(k)).pack(side="right")
+
+        pts = tk.Frame(m, bg=BG)
+        pts.pack(fill="x", pady=(6, 0))
+        for text, key in [("Ponto Amovível", "amovivel"),
+                          ("Ponto Nome", "nome"),
+                          ("Ponto Entrar", "entrar")]:
+            tk.Button(pts, text=text, bg=BG3, fg=FG, relief="flat", bd=0,
+                      font=("Segoe UI", 8), padx=6, pady=2,
+                      command=lambda k=key: self._capture_point(k)).pack(side="left", padx=(0, 4))
+
         # teste de tecla
+        self._section(m, "AJUSTES")
         test_row = tk.Frame(m, bg=BG)
         test_row.pack(fill="x", pady=(0, 6))
         tk.Label(test_row, text="Testar tecla", bg=BG, fg="#565f89", font=FONTS).pack(side="left", padx=(0, 6))
@@ -324,7 +496,6 @@ class App(tk.Tk):
                   command=self._test_key).pack(side="left")
 
         # config
-        tk.Frame(m, bg=BG3, height=1).pack(fill="x", pady=(4, 8))
         cfg = tk.Frame(m, bg=BG)
         cfg.pack(fill="x")
         tk.Label(cfg, text="Buff teclas", bg=BG, fg="#565f89", font=FONTS).pack(side="left")
@@ -343,13 +514,39 @@ class App(tk.Tk):
                   command=self._save_cfg).pack(side="right")
 
         # log
-        tk.Frame(m, bg=BG3, height=1).pack(fill="x", pady=8)
+        tk.Frame(m, bg=BG3, height=1).pack(fill="x", pady=(10, 6))
         self.log_box = tk.Text(m, height=6, width=42, bg=BG2, fg="#7982a9",
                                font=("Consolas", 8), relief="flat", state="disabled",
                                wrap="word", padx=6, pady=4)
         self.log_box.pack(fill="x")
 
     # ── ações ────────────────────────────────────────────────────
+    # ── câmaras ──────────────────────────────────────────────────
+    def _section(self, parent, text):
+        tk.Label(parent, text=text, bg=BG, fg="#565f89",
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(10, 3))
+
+    def _capture_point(self, key):
+        hwnd = find_mir4()
+        if not hwnd:
+            self._log("[pts] MIR4 não encontrado")
+            return
+        self._log(f"[pts] 3s — ponha o mouse no ponto de {key}")
+
+        def snap():
+            x, y = client_point(hwnd)
+            self.bot.pts[key] = (x, y)
+            self.bot.save_cfg()
+            self._log(f"[pts] {key} = {x},{y}")
+
+        self.after(3000, snap)
+
+    def _search(self, key):
+        if self.bot.searching == key:
+            self.bot.search_stop.set()
+            return
+        threading.Thread(target=self.bot.buscar_sala, args=(key,), daemon=True).start()
+
     def _test_key(self):
         key = self.ent_test.get().strip() or "1"
         if key_code(key) is None:
@@ -373,14 +570,6 @@ class App(tk.Tk):
             self.bot.flags[k] = False
             t.set(False)
         self._log("[*] Tudo OFF")
-
-    def _focus(self):
-        hwnd = find_mir4()
-        if hwnd:
-            force_foreground(hwnd)
-            self._log("[foco] MIR4 focado")
-        else:
-            self._log("[!] MIR4 não encontrado")
 
     def _save_cfg(self):
         keys = [k.strip() for k in self.ent_keys.get().split(",") if k.strip()]
@@ -446,7 +635,12 @@ class App(tk.Tk):
         else:
             self.lbl_status.config(text="MIR4 não encontrado")
             self.dot.config(fg=RED)
-        self.after(2000, self._tick)
+
+        for k, b in getattr(self, "room_btns", {}).items():
+            run = self.bot.searching == k
+            b.config(text="Parar" if run else "Procurar",
+                     bg=RED if run else BLUE, fg=BG)
+        self.after(1000, self._tick)
 
     def _quit(self):
         self.bot.stop.set()

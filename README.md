@@ -12,6 +12,23 @@ pode usar o PC normalmente com o jogo atrás de outras janelas.
 
 Se o jogo não reagir, ele lê teclado por Raw Input e ignora mensagens postadas.
 
+## Câmaras (XP 1 / XP 2 / XP 3 / Anti-Demônio)
+
+Clica no botão azul **Amovível** até o nome da sala bater com a referência salva.
+
+Treinar uma vez (a ordem importa):
+
+1. Abra a tela das câmaras no jogo.
+2. **Ponto Amovível** → clique e em 3s ponha o mouse sobre o botão azul.
+3. **Ponto Nome** → clique e em 3s ponha o mouse no **começo** do texto do nome da sala
+   (ex: `[6F] Câmara de Experiência II`). O recorte é de 340x26 px a partir desse ponto.
+4. **Ponto Entrar** → onde clicar pra entrar na sala depois de achar.
+5. **Salvar** na linha da sala desejada **enquanto ela está na tela** (repita para cada uma).
+6. **Procurar** na linha da sala. **Parar** interrompe.
+
+Tudo fica salvo em `%APPDATA%\MIR4Bot\salas.json` — só treina uma vez.
+A captura usa `PrintWindow`, então funciona com o jogo atrás de outras janelas (não minimizado).
+
 ## Atualização
 
 O app checa sozinho o último release ao abrir; clique na versão no canto pra checar na hora.
