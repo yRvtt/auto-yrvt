@@ -972,6 +972,7 @@ class App(tk.Tk):
             for key in MODE_DEFAULT_INTERVAL
         }
         self.ultimate_var = tk.BooleanVar(value=False)
+        self.ultimate_key_var = tk.StringVar(value="r")
         self.mode_cards = {}
 
         tk.Label(body, text="MODO DE COMBATE", bg=BG, fg=MUTED,
@@ -1011,11 +1012,16 @@ class App(tk.Tk):
                 tk.Label(row, text="s", bg=SURFACE, fg=MUTED,
                          font=(FONT, 8)).pack(side="left")
                 if key == "farm":
-                    ToggleSwitch(row, self.ultimate_var,
-                                 command=self._save_ui).pack(
-                        side="right")
-                    tk.Label(row, text="Ultimate R", bg=SURFACE, fg=MUTED,
-                             font=(FONT, 8)).pack(side="right", padx=(0, 6))
+                    ult_row = tk.Frame(inner, bg=SURFACE)
+                    ult_row.pack(fill="x", pady=(5, 0))
+                    ToggleSwitch(ult_row, self.ultimate_var,
+                                 command=self._save_ui).pack(side="left")
+                    tk.Label(ult_row, text="Ultimate", bg=SURFACE, fg=MUTED,
+                             font=(FONT, 8)).pack(side="left", padx=(6, 3))
+                    tk.Label(ult_row, text="tecla", bg=SURFACE, fg=MUTED,
+                             font=(FONT, 8)).pack(side="left")
+                    self._entry(ult_row, self.ultimate_key_var, 3).pack(
+                        side="left", padx=3)
             for w in (card, inner, top, check, title, desc_label):
                 w.bind("<Button-1>", lambda _e, k=key: self._select_mode(k))
             for w in (card, title, desc_label):
@@ -1611,8 +1617,11 @@ class App(tk.Tk):
             profile.setdefault("mode_cfg", {}).setdefault(key, {})
             profile["mode_cfg"][key]["interval"] = self._num(
                 var, MODE_DEFAULT_INTERVAL.get(key, 5.0), 0.5)
-        profile["mode_cfg"].setdefault("farm", {})["ultimate"] = bool(
-            self.ultimate_var.get())
+        farm = profile["mode_cfg"].setdefault("farm", {})
+        farm["ultimate"] = bool(self.ultimate_var.get())
+        farm["ultimate_key"] = (
+            self.ultimate_key_var.get().strip().lower() or "r")
+        farm.setdefault("ultimate_interval", 0.8)
 
         extras = profile.setdefault("extras", {})
         buff = extras.setdefault("buff", {})
@@ -1640,8 +1649,10 @@ class App(tk.Tk):
                 value = (profile.get("mode_cfg", {}).get(key, {})
                          .get("interval", MODE_DEFAULT_INTERVAL[key]))
                 var.set(self._fmt_num(value))
-            self.ultimate_var.set(bool(
-                profile.get("mode_cfg", {}).get("farm", {}).get("ultimate", False)))
+            farm_cfg = profile.get("mode_cfg", {}).get("farm", {})
+            self.ultimate_var.set(bool(farm_cfg.get("ultimate", False)))
+            self.ultimate_key_var.set(
+                farm_cfg.get("ultimate_key", "r") or "r")
             buff = profile.get("extras", {}).get("buff", {})
             self.buff_on.set(bool(buff.get("on")))
             self.buff_int.set(self._fmt_num(buff.get("interval", 180)))

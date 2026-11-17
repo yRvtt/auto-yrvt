@@ -382,7 +382,8 @@ def default_mode_cfg():
         key: {"interval": value}
         for key, value in MODE_DEFAULT_INTERVAL.items()
     } | {"farm": {"interval": MODE_DEFAULT_INTERVAL["farm"],
-                  "ultimate": False}}
+                  "ultimate": False, "ultimate_key": "r",
+                  "ultimate_interval": 0.8}}
 
 
 def default_extras():
@@ -436,6 +437,8 @@ def normalize_profile(name, data):
     if not isinstance(profile["mode_cfg"].get("farm"), dict):
         profile["mode_cfg"]["farm"] = {"interval": MODE_DEFAULT_INTERVAL["farm"]}
     profile["mode_cfg"]["farm"].setdefault("ultimate", False)
+    profile["mode_cfg"]["farm"].setdefault("ultimate_key", "r")
+    profile["mode_cfg"]["farm"].setdefault("ultimate_interval", 0.8)
     for key, cfg in default_extras().items():
         if not isinstance(profile["extras"].get(key), dict):
             profile["extras"][key] = dict(cfg)
@@ -679,6 +682,7 @@ class Instance:
         self.thread = None
         self.next_mode = 0.0
         self.next_extra = {}
+        self.next_ultimate = 0.0
         self.acordar_started = False
         self.keys_down = set()
         self.task_count = 0
@@ -722,6 +726,7 @@ class Instance:
         self.task_count = 0
         self.next_mode = time.time()
         self.next_action = time.time() + 0.5
+        self.next_ultimate = 0.0
         self.prefer_extra = False
         now = time.time()
         self.next_extra = {
@@ -834,11 +839,29 @@ class Instance:
             if self.pause_event.is_set():
                 self.stop_event.wait(0.2)
                 continue
+            now = time.time()
+            mode = self.profile.get("mode", "off")
+
+            # Ultimate é independente do ciclo do farm: tenta de novo a cada
+            # ~0.8 s para sair assim que a recarga liberar.
+            if mode == "farm":
+                cfg = self.profile.get("mode_cfg", {}).get("farm", {})
+                if cfg.get("ultimate"):
+                    if now >= self.next_ultimate:
+                        key = (cfg.get("ultimate_key") or "r").strip().lower()
+                        try:
+                            interval = float(
+                                cfg.get("ultimate_interval", 0.8) or 0.8)
+                        except Exception:
+                            interval = 0.8
+                        self.tap(key, hold=0.08)
+                        self.next_ultimate = time.time() + max(0.3, interval)
+                        self.log_task(f"ulti: {key.upper()}", every=20)
+
             if time.time() < self.next_action:
                 self.stop_event.wait(0.2)
                 continue
             now = time.time()
-            mode = self.profile.get("mode", "off")
             due_extras = [
                 (key, cfg)
                 for key, cfg in list(self.profile.get("extras", {}).items())
@@ -883,7 +906,6 @@ class Instance:
             self.burst(["tab"] + ["pagedown"] * 3 + ["f"])
             self.log_task("acordar: ciclo")
         elif mode == "farm":
-            cfg = self.profile["mode_cfg"].get("farm", {})
             self.tap("tab")
             if not self._sleep(0.5):
                 return
@@ -891,11 +913,7 @@ class Instance:
             if not self._sleep(0.4):
                 return
             self.tap("f")
-            if cfg.get("ultimate"):
-                if not self._sleep(0.4):
-                    return
-                self.tap("r")
-            self.log_task("farm: Tab ↓ F" + (" R" if cfg.get("ultimate") else ""))
+            self.log_task("farm: Tab ↓ F")
         elif mode == "missao_q":
             keys = ["q", "e"]
             random.shuffle(keys)
