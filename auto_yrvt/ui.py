@@ -1045,6 +1045,19 @@ class App(tk.Tk):
                  bg=SURFACE2, fg=MUTED, font=(FONT, 8), justify="left",
                  wraplength=210).pack(anchor="w", pady=(2, 0))
 
+        self.ultimate_warn = tk.Frame(body, bg=BG)
+        self.ultimate_warn.pack(fill="x", pady=(0, 8))
+        self.ultimate_hint = tk.Label(
+            self.ultimate_warn, text="", bg=BG, fg=MUTED,
+            font=(FONT, 8), anchor="w", justify="left")
+        self.ultimate_hint.pack(side="left", fill="x", expand=True)
+        self.ultimate_fix_btn = HoverButton(
+            self.ultimate_warn, "Ativar Farm + Ultimate",
+            self._fix_ultimate_mode, bg="#3a2a18", hover="#4a3620",
+            fg=ORANGE, font=(FONT, 8), padx=8, pady=3)
+        self.ultimate_fix_btn.pack(side="right", padx=(8, 0))
+        self.ultimate_fix_btn.pack_forget()
+
         tk.Label(body, text="EXTRAS", bg=BG, fg=MUTED,
                  font=(FONT, 8, "bold")).pack(anchor="w")
         tk.Label(body, text="Buff periódico e macros gravadas para o dia.",
@@ -1157,6 +1170,34 @@ class App(tk.Tk):
             card.configure(highlightbackground=ACCENT if on else BORDER)
             check.configure(text="✓" if on else "○",
                             fg=ACCENT if on else MUTED)
+        self._update_ultimate_hint()
+
+    def _update_ultimate_hint(self):
+        if not hasattr(self, "ultimate_hint"):
+            return
+        active = self.ultimate_var.get()
+        mode = self.mode_var.get()
+        if active and mode != "farm":
+            self.ultimate_hint.configure(
+                text="Ultimate ligada, mas só roda no Farm EXP. "
+                     "O R do Acordar é a rotina de menu.",
+                fg=ORANGE)
+            if not self.ultimate_fix_btn.winfo_manager():
+                self.ultimate_fix_btn.pack(side="right", padx=(8, 0))
+        elif active:
+            self.ultimate_hint.configure(
+                text="Ultimate ativa: R é tentado a cada ~0,8 s no Farm EXP.",
+                fg=GREEN)
+            self.ultimate_fix_btn.pack_forget()
+        else:
+            self.ultimate_hint.configure(text="Ultimate desligada.", fg=MUTED)
+            self.ultimate_fix_btn.pack_forget()
+
+    def _fix_ultimate_mode(self):
+        self.mode_var.set("farm")
+        self.ultimate_var.set(True)
+        self._on_mode_change()
+        self.toast("Farm EXP com Ultimate ativado.", "success")
 
     def _build_layout(self):
         page = tk.Frame(self.page_host, bg=BG)
@@ -2319,6 +2360,7 @@ class App(tk.Tk):
             if item:
                 card.set_data(item, hwnd == self._sel, self._pulse_phase)
         self._refresh_profile_labels()
+        self._update_ultimate_hint()
 
     # ── log e threads ────────────────────────────────────────────
     def log(self, message):

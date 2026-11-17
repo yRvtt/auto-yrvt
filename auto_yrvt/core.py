@@ -74,7 +74,7 @@ MODES = [
     ("farm", "Farm EXP", "Tab → Down → F (+ R ultimate)"),
     ("missao_q", "Missão Q", "Q/E → T x3 → cliques no centro"),
     ("boss", "Summon Boss", "E periódico"),
-    ("acordar", "Acordar", "R → Tab → PageDown x3 → F"),
+    ("acordar", "Acordar", "R → menu → Tab → PageDown x3 → F (sem ultimate)"),
 ]
 
 MODE_DEFAULT_INTERVAL = {
