@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import updater, vision
+from . import memory, updater, vision
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
@@ -1298,6 +1298,11 @@ class App(tk.Tk):
 
         self._xp_active = None
         self._xp_sig = None
+        self._mem_handle = None
+        self._mem_pid = None
+        self._mem_candidates = None
+        self._mem_addr = None
+        self.xp_mem_value_var = tk.StringVar()
         self.xp_spot_var = tk.StringVar(value="Spot 1")
         self.xp_start_var = tk.StringVar()
         self.xp_end_var = tk.StringVar()
@@ -1392,6 +1397,41 @@ class App(tk.Tk):
 
         card, inner = self._card(body)
         card.pack(fill="x", pady=4)
+        tk.Label(inner, text="LEITURA POR MEMÓRIA",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
+        self.xp_mem_status = tk.Label(
+            inner, text="Nenhum endereço encontrado.",
+            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w", justify="left")
+        self.xp_mem_status.pack(fill="x", pady=(4, 6))
+        row = tk.Frame(inner, bg=SURFACE)
+        row.pack(fill="x")
+        tk.Label(row, text="XP atual (%)", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_mem_value_var, 8).pack(
+            side="left", padx=(3, 10))
+        self.xp_mem_scan_btn = HoverButton(
+            row, "1° Scan", self._mem_scan_xp, bg="#1f3b4f",
+            hover="#264a63", font=(FONT, 8), padx=8, pady=3)
+        self.xp_mem_scan_btn.pack(side="left")
+        self.xp_mem_rescan_btn = HoverButton(
+            row, "Re-scan", self._mem_rescan_xp, bg="#1f3b4f",
+            hover="#264a63", font=(FONT, 8), padx=8, pady=3,
+            state="disabled")
+        self.xp_mem_rescan_btn.pack(side="left", padx=6)
+        self.xp_mem_read_btn = HoverButton(
+            row, "Ler agora", self._mem_read_xp, bg="#1f4f3a",
+            hover="#27634a", font=(FONT, 8), padx=8, pady=3,
+            state="disabled")
+        self.xp_mem_read_btn.pack(side="left")
+        tk.Label(inner,
+                 text="Digite seu XP% atual no jogo, clique 1° Scan. "
+                      "Ganhe XP, atualize o valor e clique Re-scan. "
+                      "Repita até achar o endereço.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
+                 justify="left").pack(anchor="w", pady=(6, 0))
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
         head = tk.Frame(inner, bg=SURFACE)
         head.pack(fill="x")
         tk.Label(head, text="COMPARAÇÃO", bg=SURFACE, fg=MUTED,
@@ -1433,6 +1473,10 @@ class App(tk.Tk):
         return inst, inst.xp_region_px()
 
     def _read_xp_value(self):
+        if self._mem_addr and self._mem_handle:
+            val = memory.read_float(self._mem_handle, self._mem_addr)
+            if val is not None:
+                return val, f"mem:0x{self._mem_addr:X}"
         inst, region = self._xp_region()
         if not inst:
             return None, "selecione uma conta"
@@ -1486,6 +1530,92 @@ class App(tk.Tk):
         self.xp_ocr_status.configure(
             text=f"Leitura: {value:.2f}%  (OCR: {text!r})", fg=GREEN)
         self.toast(f"XP lido: {value:.2f}%", "success")
+
+    def _mem_ensure_handle(self):
+        inst = self._sel_inst()
+        if not inst:
+            self.toast("Selecione uma conta primeiro.", "warning")
+            return None
+        pid = inst.win.pid
+        if self._mem_pid != pid:
+            if self._mem_handle:
+                memory.close_process(self._mem_handle)
+            self._mem_handle = memory.open_process(pid)
+            self._mem_pid = pid
+            self._mem_candidates = None
+            self._mem_addr = None
+            if not self._mem_handle:
+                self.toast("Não consegui abrir o processo. Rode como admin.",
+                           "error")
+                return None
+        return self._mem_handle
+
+    def _mem_scan_xp(self):
+        handle = self._mem_ensure_handle()
+        if not handle:
+            return
+        val = self._parse_pct(self.xp_mem_value_var.get())
+        if val is None:
+            self.toast("Digite o XP% atual (ex.: 45.23).", "warning")
+            return
+        self.xp_mem_status.configure(text="Escaneando memória...", fg=ORANGE)
+        self.update_idletasks()
+
+        def run():
+            results = memory.scan_float(handle, val, tolerance=0.01)
+            self.after(0, lambda: self._mem_scan_done(results))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _mem_scan_done(self, results):
+        self._mem_candidates = results
+        n = len(results)
+        if n == 0:
+            self.xp_mem_status.configure(
+                text="Nenhum endereço encontrado. Verifique o valor.", fg=RED)
+            self.xp_mem_rescan_btn.configure(state="disabled")
+            self.xp_mem_read_btn.configure(state="disabled")
+        elif n <= 10:
+            self._mem_addr = results[0]
+            self.xp_mem_status.configure(
+                text=f"{n} endereço(s) encontrado(s). Pronto pra ler!",
+                fg=GREEN)
+            self.xp_mem_rescan_btn.configure(state="normal")
+            self.xp_mem_read_btn.configure(state="normal")
+        else:
+            self.xp_mem_status.configure(
+                text=f"{n} candidatos. Ganhe XP, atualize o valor e Re-scan.",
+                fg=ACCENT)
+            self.xp_mem_rescan_btn.configure(state="normal")
+            self.xp_mem_read_btn.configure(state="disabled")
+
+    def _mem_rescan_xp(self):
+        handle = self._mem_ensure_handle()
+        if not handle or not self._mem_candidates:
+            return
+        val = self._parse_pct(self.xp_mem_value_var.get())
+        if val is None:
+            self.toast("Atualize o XP% atual e clique Re-scan.", "warning")
+            return
+        results = memory.scan_float(
+            handle, val, tolerance=0.01, candidates=self._mem_candidates)
+        self._mem_scan_done(results)
+
+    def _mem_read_xp(self):
+        handle = self._mem_ensure_handle()
+        if not handle or not self._mem_addr:
+            return
+        val = memory.read_float(handle, self._mem_addr)
+        if val is None:
+            self.xp_mem_status.configure(
+                text="Falha na leitura. Endereço pode ter mudado.", fg=RED)
+            return
+        field = self.xp_end_var if self._xp_active else self.xp_start_var
+        field.set(f"{val:.2f}")
+        self.xp_mem_status.configure(
+            text=f"Leitura: {val:.2f}%  (addr: 0x{self._mem_addr:X})",
+            fg=GREEN)
+        self.toast(f"XP (memória): {val:.2f}%", "success")
 
     def _xp_start(self):
         if self._xp_active:
