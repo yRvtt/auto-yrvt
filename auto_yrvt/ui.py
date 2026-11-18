@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import memory, updater, vision
+from . import memory, ue4, updater, vision
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
@@ -1302,6 +1302,7 @@ class App(tk.Tk):
         self._mem_pid = None
         self._mem_candidates = None
         self._mem_addr = None
+        self._ue4_result = None
         self.xp_mem_value_var = tk.StringVar()
         self.xp_spot_var = tk.StringVar(value="Spot 1")
         self.xp_start_var = tk.StringVar()
@@ -1429,6 +1430,24 @@ class App(tk.Tk):
                       "Repita até achar o endereço.",
                  bg=SURFACE, fg=MUTED, font=(FONT, 7),
                  justify="left").pack(anchor="w", pady=(6, 0))
+
+        sep = tk.Frame(inner, bg=BORDER, height=1)
+        sep.pack(fill="x", pady=(10, 6))
+        tk.Label(inner, text="AUTO-DETECT (UE4 SDK DUMP)",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
+        self.xp_sdk_status = tk.Label(
+            inner, text="Varre GNames/GObjects do UE4 pra achar offsets.",
+            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w",
+            justify="left", wraplength=600)
+        self.xp_sdk_status.pack(fill="x", pady=(4, 6))
+        sdk_row = tk.Frame(inner, bg=SURFACE)
+        sdk_row.pack(fill="x")
+        self.xp_sdk_btn = HoverButton(
+            sdk_row, "Dump SDK", self._sdk_dump, bg="#3a1f4f",
+            hover="#4a2863", font=(FONT, 8), padx=8, pady=3)
+        self.xp_sdk_btn.pack(side="left")
+        self.xp_sdk_props_box = tk.Frame(inner, bg=SURFACE)
+        self.xp_sdk_props_box.pack(fill="x", pady=(6, 0))
 
         card, inner = self._card(body)
         card.pack(fill="x", pady=4)
@@ -1616,6 +1635,65 @@ class App(tk.Tk):
             text=f"Leitura: {val:.2f}%  (addr: 0x{self._mem_addr:X})",
             fg=GREEN)
         self.toast(f"XP (memória): {val:.2f}%", "success")
+
+    def _sdk_dump(self):
+        handle = self._mem_ensure_handle()
+        if not handle:
+            return
+        self.xp_sdk_status.configure(text="Escaneando GNames...", fg=ORANGE)
+        self.xp_sdk_btn.configure(state="disabled")
+        self.update_idletasks()
+
+        def run():
+            def progress(phase, pct):
+                self.after(0, lambda p=phase, v=pct:
+                           self.xp_sdk_status.configure(
+                               text=f"{p}: {v}%", fg=ORANGE))
+            result = ue4.full_scan(handle, progress)
+            self.after(0, lambda: self._sdk_dump_done(result))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _sdk_dump_done(self, result):
+        self.xp_sdk_btn.configure(state="normal")
+        for w in self.xp_sdk_props_box.winfo_children():
+            w.destroy()
+
+        if not result:
+            self.xp_sdk_status.configure(
+                text="Não encontrou GNames/GObjects. O jogo está aberto?",
+                fg=RED)
+            return
+
+        player_data = result.get("player_data", {})
+        if not player_data:
+            gn = result["gnames"]
+            go = result["gobjects"]
+            self.xp_sdk_status.configure(
+                text=f"GNames OK ({sum(1 for b in gn['blocks'] if b)} blocos), "
+                     f"GObjects OK ({go['num_elements']} objetos). "
+                     f"Mas nenhuma classe do jogador encontrada.",
+                fg=ORANGE)
+            self._ue4_result = result
+            return
+
+        total_props = sum(len(v) for v in player_data.values())
+        self.xp_sdk_status.configure(
+            text=f"Encontrado! {len(player_data)} classes, "
+                 f"{total_props} propriedades.",
+            fg=GREEN)
+        self._ue4_result = result
+
+        for cls_name, props in player_data.items():
+            tk.Label(self.xp_sdk_props_box, text=cls_name,
+                     bg=SURFACE, fg=ACCENT, font=(FONT, 8, "bold")).pack(
+                anchor="w", pady=(4, 0))
+            for pname, offset in sorted(props.items(), key=lambda x: x[1]):
+                row = tk.Frame(self.xp_sdk_props_box, bg=SURFACE)
+                row.pack(fill="x")
+                tk.Label(row, text=f"  0x{offset:04X}  {pname}",
+                         bg=SURFACE, fg=MUTED, font=(MONO, 8)).pack(
+                    side="left")
 
     def _xp_start(self):
         if self._xp_active:
