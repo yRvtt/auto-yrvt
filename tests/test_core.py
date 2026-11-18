@@ -156,6 +156,38 @@ class MiscTests(unittest.TestCase):
         # deve tentar R várias vezes, não só uma por ciclo de farm
         self.assertGreaterEqual(calls.count("r"), 2)
 
+    def test_ultimate_is_retried_in_acordar(self):
+        class Manager:
+            cfg = type("Cfg", (), {"save": lambda _self: None})()
+
+            def log(self, _message):
+                pass
+
+        class Win:
+            hwnd = 1
+            title = "fake"
+
+        profile = core.default_profile("teste")
+        profile["mode"] = "acordar"
+        profile["mode_cfg"]["acordar"]["interval"] = 100.0
+        profile["mode_cfg"]["farm"]["ultimate"] = True
+        profile["mode_cfg"]["farm"]["ultimate_key"] = "r"
+        profile["mode_cfg"]["farm"]["ultimate_interval"] = 0.3
+        instance = core.Instance(Manager(), Win(), profile, "teste")
+        calls = []
+        instance.tap = lambda key, hold=0.06: calls.append(key) or True
+        instance.click_rel = lambda _x, _y: True
+        instance.start()
+        try:
+            import time
+            time.sleep(2.0)
+        finally:
+            instance.stop()
+            if instance.thread:
+                instance.thread.join(timeout=1.0)
+        self.assertGreaterEqual(calls.count("r"), 2)
+        self.assertIn("tab", calls)
+
 
 if __name__ == "__main__":
     unittest.main()

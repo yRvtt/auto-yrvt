@@ -1181,16 +1181,16 @@ class App(tk.Tk):
             return
         active = self.ultimate_var.get()
         mode = self.mode_var.get()
-        if active and mode != "farm":
+        if active and mode not in ("farm", "acordar"):
             self.ultimate_hint.configure(
-                text="Ultimate ligada, mas só roda no Farm EXP. "
-                     "O R do Acordar é a rotina de menu.",
+                text="Ultimate ligada, mas só roda no Farm EXP e no Acordar.",
                 fg=ORANGE)
             if not self.ultimate_fix_btn.winfo_manager():
                 self.ultimate_fix_btn.pack(side="right", padx=(8, 0))
         elif active:
             self.ultimate_hint.configure(
-                text="Ultimate ativa: R é tentado a cada ~0,8 s no Farm EXP.",
+                text="Ultimate ativa: R é tentado a cada ~0,8 s "
+                     "no Farm EXP e no Acordar.",
                 fg=GREEN)
             self.ultimate_fix_btn.pack_forget()
         else:

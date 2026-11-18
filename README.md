@@ -41,7 +41,7 @@
 ## Funcionalidades
 
 - **Contas** em cards com status pulsando e ações rápidas.
-- **Modos**: Farm EXP com Ultimate, Missão Q, Summon Boss e Acordar.
+- **Modos**: Farm EXP e Acordar com Ultimate, Missão Q e Summon Boss.
 - **Extras**: Auto-Buff, Doar clã e Comprar Intensify.
 - **Perfis** vinculados pelo título da janela.
 - **Grade de janelas** com preview visual.
@@ -86,9 +86,14 @@ A navegação fica na barra lateral: **Contas**, **Tarefas**, **Layout**, **XP**
 | Farm EXP | `Tab` → `Down` → `F` (+ `R` com Ultimate) | 4 s |
 | Missão Q | `Q`/`E` → `T` x3 → 5 cliques no centro | 8 s |
 | Summon Boss | `E` | 10 s |
-| Acordar | `R` → menu → `Tab` → `PageDown` x3 → `F` | 3,8 s |
+| Acordar | `R` → `Tab` → `PageDown` x3 → `F` (ultimate opcional) | 3,8 s |
 
 O modo é exclusivo. Buff e macros rodam entre os ciclos.
+
+Com **Ultimate** ligada, o `R` é tentado a cada ~0,8 s no **Farm EXP** e no
+**Acordar**, independente do ciclo. A tecla é configurável no card do Farm.
+Se no seu Acordar o `R` abre menu em vez de ultimate, desligue a Ultimate para
+manter a rotina de menu.
 
 ## Macros: doar clã e Intensify
 

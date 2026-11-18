@@ -74,7 +74,7 @@ MODES = [
     ("farm", "Farm EXP", "Tab → Down → F (+ R ultimate)"),
     ("missao_q", "Missão Q", "Q/E → T x3 → cliques no centro"),
     ("boss", "Summon Boss", "E periódico"),
-    ("acordar", "Acordar", "R → menu → Tab → PageDown x3 → F (sem ultimate)"),
+    ("acordar", "Acordar", "R → Tab → PageDown x3 → F (ultimate opcional)"),
 ]
 
 MODE_DEFAULT_INTERVAL = {
@@ -893,9 +893,9 @@ class Instance:
             now = time.time()
             mode = self.profile.get("mode", "off")
 
-            # Ultimate é independente do ciclo do farm: tenta de novo a cada
-            # ~0.8 s para sair assim que a recarga liberar.
-            if mode == "farm":
+            # Ultimate é independente do ciclo: Farm e Acordar tentam de novo
+            # a cada ~0.8 s para sair assim que a recarga liberar.
+            if mode in ("farm", "acordar"):
                 cfg = self.profile.get("mode_cfg", {}).get("farm", {})
                 if cfg.get("ultimate"):
                     if now >= self.next_ultimate:
@@ -948,7 +948,9 @@ class Instance:
 
     def run_mode(self, mode):
         if mode == "acordar":
-            if not self.acordar_started:
+            ultimate_on = self.profile["mode_cfg"].get("farm", {}).get(
+                "ultimate")
+            if not ultimate_on and not self.acordar_started:
                 self.tap("r")
                 self.acordar_started = True
                 self.log_task("acordar: R → menu")
