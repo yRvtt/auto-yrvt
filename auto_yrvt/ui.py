@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import updater
+from . import updater, vision
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
@@ -1301,6 +1301,9 @@ class App(tk.Tk):
         self.xp_spot_var = tk.StringVar(value="Spot 1")
         self.xp_start_var = tk.StringVar()
         self.xp_end_var = tk.StringVar()
+        self.xp_ocr_auto = tk.BooleanVar(value=vision.ocr_available())
+        self.xp_region_w_var = tk.StringVar(value="180")
+        self.xp_region_h_var = tk.StringVar(value="34")
 
         tk.Label(body, text="LABORATÓRIO DE XP", bg=BG, fg=MUTED,
                  font=(FONT, 8, "bold")).pack(anchor="w")
@@ -1352,6 +1355,43 @@ class App(tk.Tk):
 
         card, inner = self._card(body)
         card.pack(fill="x", pady=4)
+        tk.Label(inner, text="LEITURA AUTOMÁTICA (OCR DO WINDOWS)",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
+        self.xp_ocr_status = tk.Label(
+            inner, text="", bg=SURFACE, fg=MUTED, font=(FONT, 8),
+            anchor="w", justify="left")
+        self.xp_ocr_status.pack(fill="x", pady=(4, 6))
+        row = tk.Frame(inner, bg=SURFACE)
+        row.pack(fill="x")
+        tk.Label(row, text="Largura", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_region_w_var, 5).pack(side="left", padx=(3, 10))
+        tk.Label(row, text="Altura", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_region_h_var, 5).pack(side="left", padx=(3, 10))
+        self.xp_ocr_cal_btn = HoverButton(
+            row, "Calibrar região", self._calibrate_xp, bg=SURFACE2,
+            hover=SURFACE3, font=(FONT, 8), padx=8, pady=3)
+        self.xp_ocr_cal_btn.pack(side="left")
+        self.xp_ocr_read_btn = HoverButton(
+            row, "Ler agora", self._read_xp_now, bg="#1f3b4f",
+            hover="#264a63", font=(FONT, 8), padx=8, pady=3)
+        self.xp_ocr_read_btn.pack(side="left", padx=6)
+        trow = tk.Frame(inner, bg=SURFACE)
+        trow.pack(fill="x", pady=(8, 0))
+        ToggleSwitch(trow, self.xp_ocr_auto, bg=SURFACE).pack(side="left")
+        tk.Label(trow, text="Ler automaticamente ao iniciar e finalizar",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8)).pack(side="left",
+                                                            padx=(6, 0))
+        tk.Label(inner,
+                 text="Capture o canto superior esquerdo do número de XP. "
+                      "Deixe o jogo visível; se o OCR falhar, use os campos "
+                      "manuais.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 7), justify="left").pack(
+            anchor="w", pady=(6, 0))
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
         head = tk.Frame(inner, bg=SURFACE)
         head.pack(fill="x")
         tk.Label(head, text="COMPARAÇÃO", bg=SURFACE, fg=MUTED,
@@ -1386,12 +1426,84 @@ class App(tk.Tk):
         except Exception:
             return None
 
+    def _xp_region(self):
+        inst = self._sel_inst()
+        if not inst:
+            return None, None
+        return inst, inst.xp_region_px()
+
+    def _read_xp_value(self):
+        inst, region = self._xp_region()
+        if not inst:
+            return None, "selecione uma conta"
+        if not region:
+            return None, "região não calibrada"
+        return vision.read_percent(inst.hwnd, region)
+
+    def _calibrate_xp(self):
+        inst, _ = self._xp_region()
+        if not inst:
+            self.toast("Selecione uma conta primeiro.", "warning")
+            return
+        self.toast("Ponha o mouse no canto superior esquerdo do XP; 3s.", "info")
+        self.after(3000, self._do_calibrate_xp)
+
+    def _do_calibrate_xp(self):
+        inst, _ = self._xp_region()
+        if not inst:
+            return
+        x, y = win32api.GetCursorPos()
+        cx, cy = win32gui.ScreenToClient(inst.hwnd, (x, y))
+        width = self._int(self.xp_region_w_var, 180, 20)
+        height = self._int(self.xp_region_h_var, 34, 12)
+        if inst.set_xp_region(cx, cy, width, height):
+            self.toast("Região de XP calibrada. Teste com Ler agora.",
+                       "success")
+            self._update_xp_ui()
+        else:
+            self.toast("Não consegui calibrar a região.", "error")
+
+    def _read_xp_now(self):
+        inst, _ = self._xp_region()
+        if not inst:
+            self.toast("Selecione uma conta primeiro.", "warning")
+            return
+        if not vision.ocr_available():
+            self.toast("OCR indisponível: instale winocr e Pillow.", "warning")
+            return
+        self.toast("Leitura em 3s; deixe o XP visível.", "info")
+        self.after(3000, self._do_read_xp_now)
+
+    def _do_read_xp_now(self):
+        value, text = self._read_xp_value()
+        if value is None:
+            self.xp_ocr_status.configure(
+                text=f"OCR não leu: {text}", fg=ORANGE)
+            self.toast(f"OCR não leu: {text}", "warning")
+            return
+        field = self.xp_end_var if self._xp_active else self.xp_start_var
+        field.set(f"{value:.2f}")
+        self.xp_ocr_status.configure(
+            text=f"Leitura: {value:.2f}%  (OCR: {text!r})", fg=GREEN)
+        self.toast(f"XP lido: {value:.2f}%", "success")
+
     def _xp_start(self):
         if self._xp_active:
             self.toast("Já existe uma sessão ativa.", "warning")
             return
         spot = self.xp_spot_var.get().strip() or "Spot 1"
         start = self._parse_pct(self.xp_start_var.get())
+        if self.xp_ocr_auto.get():
+            value, text = self._read_xp_value()
+            if value is not None:
+                start = value
+                self.xp_start_var.set(f"{value:.2f}")
+                self.xp_ocr_status.configure(
+                    text=f"Leitura inicial: {value:.2f}%", fg=GREEN)
+            elif start is None:
+                self.toast(f"OCR não leu ({text}). Informe o XP inicial.",
+                           "warning")
+                return
         if start is None:
             self.toast("Informe o XP inicial (ex.: 12.34).", "warning")
             return
@@ -1410,6 +1522,17 @@ class App(tk.Tk):
             self.toast("Nenhuma sessão ativa.", "warning")
             return
         end = self._parse_pct(self.xp_end_var.get())
+        if self.xp_ocr_auto.get():
+            value, text = self._read_xp_value()
+            if value is not None:
+                end = value
+                self.xp_end_var.set(f"{value:.2f}")
+                self.xp_ocr_status.configure(
+                    text=f"Leitura final: {value:.2f}%", fg=GREEN)
+            elif end is None:
+                self.toast(f"OCR não leu ({text}). Informe o XP final.",
+                           "warning")
+                return
         if end is None:
             self.toast("Informe o XP final (ex.: 15.67).", "warning")
             return
@@ -1505,6 +1628,32 @@ class App(tk.Tk):
             self.xp_start_btn.configure(state="normal")
             self.xp_stop_btn.configure(state="disabled")
             self.xp_cancel_btn.configure(state="disabled")
+
+        inst = self._sel_inst()
+        if not vision.ocr_available():
+            self.xp_ocr_status.configure(
+                text="OCR indisponível: instale winocr e Pillow.", fg=ORANGE)
+            self.xp_ocr_cal_btn.configure(state="disabled")
+            self.xp_ocr_read_btn.configure(state="disabled")
+        elif not inst:
+            self.xp_ocr_status.configure(
+                text="Selecione uma conta para calibrar a região.", fg=MUTED)
+            self.xp_ocr_cal_btn.configure(state="disabled")
+            self.xp_ocr_read_btn.configure(state="disabled")
+        else:
+            region = inst.xp_region_px()
+            self.xp_ocr_cal_btn.configure(state="normal")
+            if region:
+                self.xp_ocr_status.configure(
+                    text=f"Região pronta: {region[2]}x{region[3]} em "
+                         f"({region[0]}, {region[1]}). Teste com Ler agora.",
+                    fg=GREEN)
+                self.xp_ocr_read_btn.configure(state="normal")
+            else:
+                self.xp_ocr_status.configure(
+                    text="Região não calibrada. Clique em Calibrar região.",
+                    fg=MUTED)
+                self.xp_ocr_read_btn.configure(state="disabled")
 
         sessions = self.cfg.xp_sessions
         sig = tuple((s.get("spot"), s.get("end_ts"), s.get("delta"),

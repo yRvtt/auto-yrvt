@@ -421,6 +421,7 @@ def default_profile(name="default"):
         "extras": default_extras(),
         "points": {"amovivel": None, "nome": None, "entrar": None},
         "refs": {},
+        "xp_region": None,
     }
 
 
@@ -468,6 +469,7 @@ def normalize_profile(name, data):
         profile["extras"][key].pop("last_run", None)
     for key in ("amovivel", "nome", "entrar"):
         profile["points"].setdefault(key, None)
+    profile.setdefault("xp_region", None)
     if not isinstance(profile.get("refs"), dict):
         profile["refs"] = {}
     return profile
@@ -854,6 +856,33 @@ class Instance:
         self.profile.setdefault("points", {})[key] = [cx, cy, w, h]
         self.manager.cfg.save()
         return cx, cy
+
+    def xp_region_px(self):
+        region = self.profile.get("xp_region")
+        if not isinstance(region, dict):
+            return None
+        try:
+            w, h = client_size(self.hwnd)
+            ref_w = region.get("ref_w") or w
+            ref_h = region.get("ref_h") or h
+            return (int(region["x"] * w / ref_w),
+                    int(region["y"] * h / ref_h),
+                    max(1, int(region["w"] * w / ref_w)),
+                    max(1, int(region["h"] * h / ref_h)))
+        except Exception:
+            return None
+
+    def set_xp_region(self, x, y, width, height):
+        w, h = client_size(self.hwnd)
+        if w <= 0 or h <= 0:
+            return False
+        self.profile["xp_region"] = {
+            "x": int(x), "y": int(y),
+            "w": max(1, int(width)), "h": max(1, int(height)),
+            "ref_w": w, "ref_h": h,
+        }
+        self.manager.cfg.save()
+        return True
 
     # ── agendador ───────────────────────────────────────────────
     def _loop(self):

@@ -101,6 +101,14 @@ class MiscTests(unittest.TestCase):
         self.assertEqual(core.format_duration(65), "01:05")
         self.assertEqual(core.format_duration(3661), "1:01:01")
 
+    def test_ocr_percent_parser(self):
+        from auto_yrvt.vision import parse_percent
+        self.assertEqual(parse_percent("12,34%"), 12.34)
+        self.assertEqual(parse_percent("12.34%"), 12.34)
+        self.assertEqual(parse_percent("1234%"), 12.34)
+        self.assertIsNone(parse_percent("150%"))
+        self.assertIsNone(parse_percent("abc"))
+
     def test_macro_replay_order(self):
         instance = object.__new__(core.Instance)
         instance.stop_event = threading.Event()

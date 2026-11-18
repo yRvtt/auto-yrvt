@@ -12,6 +12,7 @@ auto_yrvt/
   core.py                  Windows, teclas, captura, perfis, macros, instâncias
   ui.py                    interface Tkinter e animações
   updater.py               auto-update via GitHub Releases
+  vision.py                OCR nativo do Windows para a região de XP
   resources/icon.ico       ícone do app e do exe
 tests/
   test_core.py             testes sem abrir o jogo
@@ -93,7 +94,8 @@ per10 = delta * 600 / segundos
 ```
 
 O resultado é persistido em `xp_sessions` e comparado no gráfico. A leitura do
-XP é manual por enquanto; OCR/barra está no roadmap.
+XP pode ser manual ou automática pela região calibrada usando o OCR nativo do
+Windows (`vision.py`); se o OCR falhar, o valor digitado é usado.
 
 ## Agendador
 

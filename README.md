@@ -130,7 +130,23 @@ O app calcula **%/hora**, **% em 10 minutos**, guarda o histórico e mostra um
 gráfico comparando os spots. Se o XP final for menor, ele pergunta quantos
 níveis subiram e soma 100% por nível.
 
-Hoje o XP é informado manualmente. A leitura automática por OCR está no roadmap.
+A leitura pode ser automática: calibre a região do XP em **Ler tela (OCR)**, teste com **Ler agora** e ligue a leitura no início/fim. Se o OCR falhar, os campos manuais continuam funcionando.
+
+### Leitura automática (OCR)
+
+Usa o **OCR nativo do Windows** (`winocr` + `Pillow` já incluídos no
+`requirements.txt`), sem precisar instalar Tesseract.
+
+1. Abra a tela de XP no jogo.
+2. Em **Leitura automática**, clique em **Calibrar região**.
+3. Em 3 s, ponha o mouse no **canto superior esquerdo** do número de XP.
+4. Ajuste largura/altura se o número não couber.
+5. Clique em **Ler agora** para conferir o valor lido.
+6. Ligue **Ler automaticamente ao iniciar e finalizar**.
+
+Deixe o jogo visível durante a leitura. Se a janela estiver protegida,
+minimizada ou o OCR não reconhecer, o app avisa e você pode digitar o valor
+manualmente.
 
 ## Launcher PC / UIAutomation
 
@@ -203,7 +219,6 @@ O workflow de release compila em tags `v*` e anexa o exe.
 
 - [ ] Presets de macro por resolução.
 - [ ] OCR para nomes de sala sem imagem de referência.
-- [ ] Leitura automática do XP (OCR ou barra) para sessões sem digitação.
 - [ ] Mais modos de farm e prioridade por conta.
 - [ ] Exportar/importar perfis.
 - [ ] Temas claros/escuros.
