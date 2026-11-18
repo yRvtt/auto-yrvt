@@ -36,6 +36,7 @@
 - **Interface agradável**: tema escuro, cards, toasts e animações leves.
 - **Launcher PC**: abre Game 1/Game 2 com UIAutomation.
 - **Câmaras por imagem**: XP 1, XP 2, XP 3 e Anti-Demônio.
+- **Laboratório de XP**: mede %/hora e compara spots.
 
 ## Funcionalidades
 
@@ -45,6 +46,7 @@
 - **Perfis** vinculados pelo título da janela.
 - **Grade de janelas** com preview visual.
 - **Busca de câmaras** por recorte de imagem.
+- **Laboratório de XP** com sessões, %/hora, % por 10 min e gráfico.
 - **Launcher / UIAutomation** com fallback para PostMessage.
 - **Pânico F12** e parada de tudo.
 - **Auto-update** via GitHub Releases.
@@ -74,7 +76,7 @@ janela do jogo.
 5. Escolha o **modo** e ajuste o intervalo.
 6. Clique em **Salvar** e depois em **Iniciar** (ou **Iniciar todas**).
 
-A navegação fica na barra lateral: **Contas**, **Tarefas**, **Layout**,
+A navegação fica na barra lateral: **Contas**, **Tarefas**, **Layout**, **XP**,
 **Câmaras**, **Launcher** e **Ajustes**. O registro fica no rodapé.
 
 ## Modos
@@ -113,6 +115,22 @@ executa várias vezes (Intensify já vem com 4). Use **Testar** com a conta para
 
 Para evitar duas contas dividindo o mesmo perfil, vincule cada janela ao seu
 próprio perfil.
+
+## Laboratório de XP
+
+Serve para descobrir qual spot rende mais XP no mesmo tempo:
+
+1. Abra a página **XP**.
+2. Digite o nome do spot e o **XP inicial (%)** que aparece no jogo.
+3. Clique em **Iniciar sessão** e deixe o macro rodando no spot.
+4. Ao voltar, informe o **XP final (%)** e clique em **Finalizar e calcular**.
+5. Repita em outro spot.
+
+O app calcula **%/hora**, **% em 10 minutos**, guarda o histórico e mostra um
+gráfico comparando os spots. Se o XP final for menor, ele pergunta quantos
+níveis subiram e soma 100% por nível.
+
+Hoje o XP é informado manualmente. A leitura automática por OCR está no roadmap.
 
 ## Launcher PC / UIAutomation
 
@@ -185,6 +203,7 @@ O workflow de release compila em tags `v*` e anexa o exe.
 
 - [ ] Presets de macro por resolução.
 - [ ] OCR para nomes de sala sem imagem de referência.
+- [ ] Leitura automática do XP (OCR ou barra) para sessões sem digitação.
 - [ ] Mais modos de farm e prioridade por conta.
 - [ ] Exportar/importar perfis.
 - [ ] Temas claros/escuros.

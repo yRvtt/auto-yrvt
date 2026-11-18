@@ -33,6 +33,8 @@ class ConfigTests(unittest.TestCase):
             {"t": "key", "k": "q", "delay": 0.1, "hold": 0.06}
         ]
         cfg.bind("conta1", "Mir4G[1]")
+        cfg.xp_sessions = [{"spot": "XP 2", "rate": 12.5,
+                            "delta": 1.0, "seconds": 300.0}]
         cfg.save()
 
         reloaded = core.Config(**paths)
@@ -40,6 +42,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(reloaded.profiles["conta1"]["mode"], "farm")
         self.assertTrue(
             reloaded.profiles["conta1"]["extras"]["doar_cla"]["macro"])
+        self.assertEqual(reloaded.xp_sessions[0]["spot"], "XP 2")
 
     def test_old_state_is_copied(self):
         paths = self._paths()
@@ -90,6 +93,13 @@ class MiscTests(unittest.TestCase):
         self.assertEqual(
             sorted(titles, key=core.window_sort_key),
             ["Mir4G[1]", "Mir4G[2]", "Mir4G[10]"])
+
+    def test_xp_rate_and_duration(self):
+        self.assertAlmostEqual(core.xp_rate(10, 3600), 10.0)
+        self.assertAlmostEqual(core.xp_rate(2, 900), 8.0)
+        self.assertEqual(core.xp_rate(1, 0), 0.0)
+        self.assertEqual(core.format_duration(65), "01:05")
+        self.assertEqual(core.format_duration(3661), "1:01:01")
 
     def test_macro_replay_order(self):
         instance = object.__new__(core.Instance)

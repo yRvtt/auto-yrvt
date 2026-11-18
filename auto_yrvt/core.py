@@ -396,6 +396,22 @@ def default_extras():
     }
 
 
+def xp_rate(delta_pct, seconds):
+    """Retorna % de XP por hora (0 se a duração for inválida)."""
+    if seconds <= 0:
+        return 0.0
+    return delta_pct * 3600.0 / seconds
+
+
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def default_profile(name="default"):
     return {
         "name": name,
@@ -468,6 +484,7 @@ class Config:
         self.launcher = {"path": "", "title": "MIR4",
                          "g1": [0, 0], "g2": [0, 0],
                          "pre": 3.0, "between": 6.0}
+        self.xp_sessions = []
         self._lock = threading.RLock()
         self.load()
 
@@ -499,6 +516,10 @@ class Config:
             _merge(self.layout, data["layout"])
         if isinstance(data.get("launcher"), dict):
             _merge(self.launcher, data["launcher"])
+        sessions = data.get("xp_sessions")
+        if isinstance(sessions, list):
+            self.xp_sessions = [s for s in sessions
+                                if isinstance(s, dict)][-50:]
 
         if not self.profiles:
             self._migrate_legacy()
@@ -531,6 +552,7 @@ class Config:
                 "profiles": self.profiles,
                 "layout": self.layout,
                 "launcher": self.launcher,
+                "xp_sessions": self.xp_sessions,
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:

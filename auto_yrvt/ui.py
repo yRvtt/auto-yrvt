@@ -21,8 +21,8 @@ from . import updater
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
-    find_launcher_window, is_admin, launch_two, open_launcher,
-    uia_available, window_sort_key,
+    find_launcher_window, format_duration, is_admin, launch_two, open_launcher,
+    uia_available, window_sort_key, xp_rate,
 )
 
 BG = "#0a0d12"
@@ -472,6 +472,7 @@ class App(tk.Tk):
         "contas": ("Contas", "Janelas do jogo, perfis e controle de execução."),
         "tarefas": ("Tarefas", "Modo de combate e extras por perfil."),
         "layout": ("Layout", "Organize várias janelas na mesma grade."),
+        "xp": ("XP", "Meça o ganho de XP por hora e compare spots."),
         "camaras": ("Câmaras", "Busca por imagem nas salas de XP e Anti-Demônio."),
         "launcher": ("Launcher", "Abra o cliente PC e os dois jogos via UIAutomation."),
         "ajustes": ("Ajustes", "Teclas de teste, atualização e configuração."),
@@ -505,6 +506,7 @@ class App(tk.Tk):
         self._build_accounts()
         self._build_tasks()
         self._build_layout()
+        self._build_xp()
         self._build_rooms()
         self._build_launcher()
         self._build_settings()
@@ -538,6 +540,7 @@ class App(tk.Tk):
                 ("contas", "◈", "Contas"),
                 ("tarefas", "✦", "Tarefas"),
                 ("layout", "▦", "Layout"),
+                ("xp", "↗", "XP"),
                 ("camaras", "◎", "Câmaras"),
                 ("launcher", "▷", "Launcher"),
                 ("ajustes", "⚙", "Ajustes")):
@@ -825,6 +828,7 @@ class App(tk.Tk):
             "contas": getattr(self, "accounts_scroll", None),
             "tarefas": getattr(self, "tasks_scroll", None),
             "layout": getattr(self, "layout_scroll", None),
+            "xp": getattr(self, "xp_scroll", None),
             "camaras": getattr(self, "rooms_scroll", None),
             "launcher": getattr(self, "launcher_scroll", None),
             "ajustes": getattr(self, "settings_scroll", None),
@@ -1282,6 +1286,315 @@ class App(tk.Tk):
                 canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2,
                                    text=str(n), fill=MUTED,
                                    font=(FONT, 9, "bold"))
+
+    # ── laboratório de XP ────────────────────────────────────────
+    def _build_xp(self):
+        page = tk.Frame(self.page_host, bg=BG)
+        self.pages["xp"] = page
+        scroll = ScrollFrame(page, bg=BG)
+        self.xp_scroll = scroll
+        scroll.pack(fill="both", expand=True)
+        body = scroll.inner
+
+        self._xp_active = None
+        self._xp_sig = None
+        self.xp_spot_var = tk.StringVar(value="Spot 1")
+        self.xp_start_var = tk.StringVar()
+        self.xp_end_var = tk.StringVar()
+
+        tk.Label(body, text="LABORATÓRIO DE XP", bg=BG, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(anchor="w")
+        tk.Label(body,
+                 text="Inicie a sessão, deixe o macro rodando no spot e informe "
+                      "o XP no começo e no fim. O tempo é medido automaticamente.",
+                 bg=BG, fg=MUTED, font=(FONT, 8), justify="left",
+                 wraplength=680).pack(anchor="w", pady=(2, 8))
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        row = tk.Frame(inner, bg=SURFACE)
+        row.pack(fill="x")
+        tk.Label(row, text="Spot", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_spot_var, 20).pack(side="left", padx=(4, 14))
+        tk.Label(row, text="XP inicial (%)", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_start_var, 8).pack(side="left", padx=(4, 14))
+        tk.Label(row, text="XP final (%)", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8)).pack(side="left")
+        self._entry(row, self.xp_end_var, 8).pack(side="left", padx=(4, 14))
+
+        actions = tk.Frame(inner, bg=SURFACE)
+        actions.pack(fill="x", pady=(10, 0))
+        self.xp_start_btn = HoverButton(
+            actions, "Iniciar sessão", self._xp_start, bg=ACCENT,
+            hover=ACCENT2, fg=BG, font=(FONT, 9, "bold"), padx=12, pady=5)
+        self.xp_start_btn.pack(side="left")
+        self.xp_stop_btn = HoverButton(
+            actions, "Finalizar e calcular", self._xp_stop, bg="#1f4f3a",
+            hover="#27634a", font=(FONT, 9), padx=12, pady=5,
+            state="disabled")
+        self.xp_stop_btn.pack(side="left", padx=6)
+        self.xp_cancel_btn = HoverButton(
+            actions, "Cancelar", self._xp_cancel, bg="#3a2024",
+            hover="#4a282e", fg=RED, font=(FONT, 9), padx=10, pady=5,
+            state="disabled")
+        self.xp_cancel_btn.pack(side="left")
+        self.xp_active_label = tk.Label(
+            inner, text="Nenhuma sessão ativa.", bg=SURFACE, fg=MUTED,
+            font=(FONT, 9), anchor="w")
+        self.xp_active_label.pack(fill="x", pady=(10, 0))
+        tk.Label(inner,
+                 text="Ao finalizar com XP menor, o app pergunta quantos níveis "
+                      "subiram e soma 100% por nível.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
+                 justify="left").pack(anchor="w", pady=(4, 0))
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        head = tk.Frame(inner, bg=SURFACE)
+        head.pack(fill="x")
+        tk.Label(head, text="COMPARAÇÃO", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(side="left")
+        self.xp_best_label = tk.Label(head, text="", bg=SURFACE, fg=ACCENT,
+                                      font=(FONT, 8))
+        self.xp_best_label.pack(side="right")
+        self.xp_chart = tk.Canvas(inner, height=180, bg=SURFACE2,
+                                  highlightthickness=0, bd=0)
+        self.xp_chart.pack(fill="x", pady=(10, 0))
+        self.xp_chart.bind("<Configure>", lambda _e: self._draw_xp_chart())
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        head = tk.Frame(inner, bg=SURFACE)
+        head.pack(fill="x")
+        tk.Label(head, text="HISTÓRICO", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(side="left")
+        HoverButton(head, "Limpar", self._xp_clear, bg=SURFACE,
+                    hover=SURFACE2, fg=MUTED, font=(FONT, 8),
+                    padx=6, pady=1).pack(side="right")
+        self.xp_sessions_box = tk.Frame(inner, bg=SURFACE)
+        self.xp_sessions_box.pack(fill="x", pady=(6, 0))
+
+        self._update_xp_ui()
+
+    @staticmethod
+    def _parse_pct(text):
+        try:
+            value = str(text).replace("%", "").replace(",", ".").strip()
+            return float(value)
+        except Exception:
+            return None
+
+    def _xp_start(self):
+        if self._xp_active:
+            self.toast("Já existe uma sessão ativa.", "warning")
+            return
+        spot = self.xp_spot_var.get().strip() or "Spot 1"
+        start = self._parse_pct(self.xp_start_var.get())
+        if start is None:
+            self.toast("Informe o XP inicial (ex.: 12.34).", "warning")
+            return
+        self._xp_active = {
+            "spot": spot,
+            "start_ts": time.time(),
+            "start_pct": start,
+        }
+        self.xp_end_var.set("")
+        self._update_xp_ui()
+        self.toast(f"Sessão iniciada: {spot}.", "success")
+
+    def _xp_stop(self):
+        active = self._xp_active
+        if not active:
+            self.toast("Nenhuma sessão ativa.", "warning")
+            return
+        end = self._parse_pct(self.xp_end_var.get())
+        if end is None:
+            self.toast("Informe o XP final (ex.: 15.67).", "warning")
+            return
+        seconds = time.time() - active["start_ts"]
+        if seconds < 1:
+            self.toast("Espere pelo menos alguns segundos.", "warning")
+            return
+        delta = end - active["start_pct"]
+        if delta < 0:
+            levels = simpledialog.askinteger(
+                "Nível subiu?",
+                "O XP final é menor que o inicial.\nQuantos níveis subiram?",
+                parent=self, initialvalue=1, minvalue=1)
+            if levels is None:
+                return
+            delta += 100.0 * levels
+        if delta <= 0:
+            self.toast("O XP final precisa ser maior que o inicial.", "warning")
+            return
+        session = {
+            "spot": active["spot"],
+            "start_ts": active["start_ts"],
+            "end_ts": time.time(),
+            "start_pct": active["start_pct"],
+            "end_pct": end,
+            "seconds": seconds,
+            "delta": delta,
+            "rate": xp_rate(delta, seconds),
+            "per10": delta * 600.0 / seconds,
+        }
+        self.cfg.xp_sessions.append(session)
+        self.cfg.xp_sessions = self.cfg.xp_sessions[-50:]
+        self.cfg.save()
+        self._xp_active = None
+        self.xp_end_var.set("")
+        self._update_xp_ui()
+        self.toast(
+            f"{session['spot']}: +{delta:.2f}% em "
+            f"{format_duration(seconds)} ({session['rate']:.1f}%/h).",
+            "success")
+
+    def _xp_cancel(self):
+        if not self._xp_active:
+            return
+        if not messagebox.askyesno("Cancelar", "Cancelar a sessão de XP atual?"):
+            return
+        self._xp_active = None
+        self._update_xp_ui()
+        self.toast("Sessão cancelada.", "info")
+
+    def _xp_clear(self):
+        if not self.cfg.xp_sessions:
+            return
+        if not messagebox.askyesno("Limpar histórico",
+                                   "Apagar todas as medições de XP?"):
+            return
+        self.cfg.xp_sessions = []
+        self.cfg.save()
+        self._xp_sig = None
+        self._update_xp_ui()
+        self.toast("Histórico de XP apagado.", "success")
+
+    def _xp_remove(self, index):
+        try:
+            session = self.cfg.xp_sessions[index]
+        except IndexError:
+            return
+        if not messagebox.askyesno(
+                "Remover", f"Remover a medição de {session.get('spot', '?')}?"):
+            return
+        self.cfg.xp_sessions.pop(index)
+        self.cfg.save()
+        self._xp_sig = None
+        self._update_xp_ui()
+
+    def _update_xp_ui(self):
+        if not hasattr(self, "xp_active_label"):
+            return
+        active = self._xp_active
+        if active:
+            elapsed = time.time() - active["start_ts"]
+            self.xp_active_label.configure(
+                text=f"Sessão ativa: {active['spot']}  ·  "
+                     f"{format_duration(elapsed)}  ·  "
+                     f"início {active['start_pct']:.2f}%",
+                fg=GREEN)
+            self.xp_start_btn.configure(state="disabled")
+            self.xp_stop_btn.configure(state="normal")
+            self.xp_cancel_btn.configure(state="normal")
+        else:
+            self.xp_active_label.configure(text="Nenhuma sessão ativa.",
+                                           fg=MUTED)
+            self.xp_start_btn.configure(state="normal")
+            self.xp_stop_btn.configure(state="disabled")
+            self.xp_cancel_btn.configure(state="disabled")
+
+        sessions = self.cfg.xp_sessions
+        sig = tuple((s.get("spot"), s.get("end_ts"), s.get("delta"),
+                     s.get("rate")) for s in sessions)
+        if sig == self._xp_sig:
+            return
+        self._xp_sig = sig
+        self._rebuild_xp_sessions()
+        self._draw_xp_chart()
+
+    def _rebuild_xp_sessions(self):
+        for child in self.xp_sessions_box.winfo_children():
+            child.destroy()
+        sessions = self.cfg.xp_sessions
+        if not sessions:
+            tk.Label(self.xp_sessions_box,
+                     text="Nenhuma medição ainda. Inicie uma sessão e rode o macro.",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8)).pack(anchor="w",
+                                                                pady=6)
+            self.xp_best_label.configure(text="")
+            return
+        best = max(s.get("rate", 0) for s in sessions)
+        best_session = max(sessions, key=lambda s: s.get("rate", 0))
+        self.xp_best_label.configure(
+            text=f"Melhor: {best_session.get('spot', '?')}  ·  {best:.1f}%/h")
+        header = tk.Frame(self.xp_sessions_box, bg=SURFACE)
+        header.pack(fill="x", pady=(0, 2))
+        for text, width in (("SPOT", 24), ("DURAÇÃO", 9), ("+XP", 8),
+                            ("%/H", 8), ("10 MIN", 8)):
+            tk.Label(header, text=text, bg=SURFACE, fg=MUTED,
+                     font=(FONT, 7, "bold"), width=width, anchor="w").pack(
+                side="left")
+        for index, session in enumerate(reversed(sessions)):
+            real_index = len(sessions) - 1 - index
+            row = tk.Frame(self.xp_sessions_box, bg=SURFACE)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=str(session.get("spot", "?")), bg=SURFACE,
+                     fg=FG, font=(FONT, 9, "bold"), width=24,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=format_duration(session.get("seconds", 0)),
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=9,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=f"+{session.get('delta', 0):.2f}%",
+                     bg=SURFACE, fg=GREEN, font=(FONT, 8), width=8,
+                     anchor="w").pack(side="left")
+            rate = session.get("rate", 0)
+            tk.Label(row, text=f"{rate:.1f}", bg=SURFACE,
+                     fg=ACCENT if rate == best else FG,
+                     font=(FONT, 8, "bold"), width=8,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=f"{session.get('per10', 0):.2f}%",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
+                     anchor="w").pack(side="left")
+            HoverButton(row, "×", lambda i=real_index: self._xp_remove(i),
+                        bg=SURFACE, hover="#3a2024", fg=RED,
+                        font=(FONT, 9), padx=4, pady=1).pack(side="right")
+
+    def _draw_xp_chart(self):
+        canvas = getattr(self, "xp_chart", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        sessions = sorted(self.cfg.xp_sessions,
+                          key=lambda s: s.get("rate", 0), reverse=True)[:6]
+        if not sessions:
+            canvas.create_text(12, 20, anchor="w", fill=MUTED,
+                               font=(FONT, 8),
+                               text="Sem dados: finalize uma sessão para comparar.")
+            return
+        width = max(200, canvas.winfo_width())
+        height = max(120, canvas.winfo_height())
+        best = max(s.get("rate", 0) for s in sessions) or 1
+        row_h = min(24, max(16, (height - 18) // max(1, len(sessions))))
+        label_w = min(150, int(width * 0.28))
+        bar_x = label_w + 8
+        bar_max = max(30, width - bar_x - 72)
+        for i, session in enumerate(sessions):
+            y = 8 + i * row_h
+            spot = str(session.get("spot", "?"))[:20]
+            rate = session.get("rate", 0)
+            canvas.create_text(4, y + row_h / 2 - 2, anchor="w",
+                               text=spot, fill=FG, font=(FONT, 8))
+            bar_w = int(bar_max * min(1.0, rate / best))
+            color = ACCENT if i == 0 else SURFACE3
+            canvas.create_rectangle(bar_x, y + 3, bar_x + max(2, bar_w),
+                                    y + row_h - 3, fill=color, outline="")
+            canvas.create_text(bar_x + bar_w + 6, y + row_h / 2 - 2,
+                               anchor="w", text=f"{rate:.1f}%/h",
+                               fill=ACCENT if i == 0 else MUTED,
+                               font=(FONT, 8, "bold" if i == 0 else "normal"))
 
     def _build_rooms(self):
         page = tk.Frame(self.page_host, bg=BG)
@@ -2223,6 +2536,7 @@ class App(tk.Tk):
             self._panic()
         self._tick_rooms()
         self._update_buttons()
+        self._update_xp_ui()
         if self._refresh_job:
             try:
                 self.after_cancel(self._refresh_job)

@@ -77,6 +77,24 @@ Cada perfil guarda:
 O vínculo é feito pelo título da janela (`Mir4G[0]`, `Mir4G[1]`, ...). O título
 exato tem prioridade; perfis sem vínculo usam `default`.
 
+As medições do Laboratório de XP ficam no mesmo `state.json`, na chave
+`xp_sessions` (lista). Cada item guarda spot, durações, XP inicial/final e
+taxas calculadas.
+
+## Laboratório de XP
+
+A UI mantém uma sessão ativa em memória (`_xp_active`) com `start_ts` e
+`start_pct`. Ao finalizar, calcula:
+
+```text
+delta = xp_final - xp_inicial (+100 por nível, se subiu)
+rate  = delta * 3600 / segundos
+per10 = delta * 600 / segundos
+```
+
+O resultado é persistido em `xp_sessions` e comparado no gráfico. A leitura do
+XP é manual por enquanto; OCR/barra está no roadmap.
+
 ## Agendador
 
 O `Instance._loop` roda em uma thread e mantém:
