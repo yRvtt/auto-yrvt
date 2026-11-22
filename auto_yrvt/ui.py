@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import memory, ue4, updater, vision
+from . import memory, sniffer, ue4, updater, vision
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
@@ -1298,6 +1298,8 @@ class App(tk.Tk):
 
         self._xp_active = None
         self._xp_sig = None
+        self._sniffer = None
+        self._sniff_timer = None
         self._mem_handle = None
         self._mem_pid = None
         self._mem_candidates = None
@@ -1398,6 +1400,30 @@ class App(tk.Tk):
 
         card, inner = self._card(body)
         card.pack(fill="x", pady=4)
+        tk.Label(inner, text="LEITURA POR PACOTES (SNIFFER)",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
+        self.xp_sniff_status = tk.Label(
+            inner, text="Parado. Requer admin.",
+            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w", justify="left")
+        self.xp_sniff_status.pack(fill="x", pady=(4, 6))
+        sniff_row = tk.Frame(inner, bg=SURFACE)
+        sniff_row.pack(fill="x")
+        self.xp_sniff_btn = HoverButton(
+            sniff_row, "Iniciar Sniffer", self._sniff_toggle, bg="#1f4f3a",
+            hover="#27634a", font=(FONT, 8), padx=8, pady=3)
+        self.xp_sniff_btn.pack(side="left")
+        self.xp_sniff_live = tk.Label(
+            inner, text="", bg=SURFACE, fg=GREEN, font=(MONO, 9),
+            anchor="w", justify="left")
+        self.xp_sniff_live.pack(fill="x", pady=(6, 0))
+        tk.Label(inner,
+                 text="Captura pacotes TCP do MIR4 (porta 33000). "
+                      "Lê XP por kill, Power e HP/MP em tempo real.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
+                 justify="left").pack(anchor="w", pady=(6, 0))
+
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
         tk.Label(inner, text="LEITURA POR MEMÓRIA",
                  bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
         self.xp_mem_status = tk.Label(
@@ -1495,6 +1521,12 @@ class App(tk.Tk):
         if self._mem_addr and self._mem_handle:
             val = memory.read_float(self._mem_handle, self._mem_addr)
             if val is not None:
+                if abs(val) < 1.1:
+                    val = val * 100
+                return val, f"mem:0x{self._mem_addr:X}"
+            ival = memory.read_int32(self._mem_handle, self._mem_addr)
+            if ival is not None and ival > 0:
+                val = ival / 10000.0 if ival > 10000 else ival / 100.0
                 return val, f"mem:0x{self._mem_addr:X}"
         inst, region = self._xp_region()
         if not inst:
@@ -1550,6 +1582,60 @@ class App(tk.Tk):
             text=f"Leitura: {value:.2f}%  (OCR: {text!r})", fg=GREEN)
         self.toast(f"XP lido: {value:.2f}%", "success")
 
+    def _sniff_toggle(self):
+        if self._sniffer and self._sniffer.running:
+            self._sniffer.stop()
+            self._sniffer = None
+            if self._sniff_timer:
+                self.after_cancel(self._sniff_timer)
+                self._sniff_timer = None
+            self.xp_sniff_btn.configure(text="Iniciar Sniffer", bg="#1f4f3a")
+            self.xp_sniff_status.configure(text="Parado.", fg=MUTED)
+            self.xp_sniff_live.configure(text="")
+            self.toast("Sniffer parado.", "info")
+            return
+        self._sniffer = sniffer.Sniffer()
+        self._sniffer.start()
+        self.after(500, self._sniff_check_started)
+
+    def _sniff_check_started(self):
+        if not self._sniffer:
+            return
+        if self._sniffer.running:
+            self.xp_sniff_btn.configure(text="Parar Sniffer", bg="#3a2024")
+            self.xp_sniff_status.configure(text="Capturando...", fg=GREEN)
+            self.toast("Sniffer iniciado.", "success")
+            self._sniff_update()
+        else:
+            self.xp_sniff_status.configure(
+                text="Falha ao iniciar. Rode como administrador.", fg=RED)
+            self._sniffer = None
+
+    def _sniff_update(self):
+        if not self._sniffer or not self._sniffer.running:
+            return
+        snap = self._sniffer.data.snapshot()
+        stats = self._sniffer.stats
+        rate = self._sniffer.data.xp_rate_per_hour()
+        lines = []
+        if snap['xp_total'] > 0:
+            lines.append(
+                f"XP/kill: {snap['xp_base']:,} + {snap['xp_bonus']:,} "
+                f"= {snap['xp_total']:,}")
+        if rate > 0:
+            lines.append(f"XP/h (abs): ~{rate:,.0f}")
+        if snap['power'] > 0:
+            lines.append(f"Power: {snap['power']:,}")
+        if snap['hp_max'] > 0:
+            lines.append(
+                f"HP: {snap['hp']:,}/{snap['hp_max']:,}  "
+                f"MP max: {snap['mp_max']:,}")
+        lines.append(
+            f"Pacotes: {stats['packets']:,}  |  "
+            f"Eventos XP: {snap['xp_count']}")
+        self.xp_sniff_live.configure(text="\n".join(lines))
+        self._sniff_timer = self.after(2000, self._sniff_update)
+
     def _mem_ensure_handle(self):
         inst = self._sel_inst()
         if not inst:
@@ -1577,11 +1663,21 @@ class App(tk.Tk):
         if val is None:
             self.toast("Digite o XP% atual (ex.: 45.23).", "warning")
             return
-        self.xp_mem_status.configure(text="Escaneando memória...", fg=ORANGE)
+        self.xp_mem_status.configure(text="Escaneando memória (multi-formato)...", fg=ORANGE)
         self.update_idletasks()
 
         def run():
-            results = memory.scan_float(handle, val, tolerance=0.01)
+            results = []
+            # float como digitado (ex: 50.79)
+            results += memory.scan_float(handle, val, tolerance=0.01)
+            # float 0-1 (ex: 0.5079)
+            results += memory.scan_float(handle, val / 100.0, tolerance=0.0001)
+            # int ×100 (ex: 5079)
+            results += memory.scan_int(handle, int(round(val * 100)))
+            # int ×10000 (ex: 507900)
+            results += memory.scan_int(handle, int(round(val * 10000)))
+            # deduplica
+            results = list(dict.fromkeys(results))
             self.after(0, lambda: self._mem_scan_done(results))
 
         threading.Thread(target=run, daemon=True).start()
@@ -1616,15 +1712,32 @@ class App(tk.Tk):
         if val is None:
             self.toast("Atualize o XP% atual e clique Re-scan.", "warning")
             return
-        results = memory.scan_float(
-            handle, val, tolerance=0.01, candidates=self._mem_candidates)
+        results = []
+        for target, tol in [(val, 0.01), (val / 100.0, 0.0001)]:
+            results += memory.scan_float(
+                handle, target, tolerance=tol, candidates=self._mem_candidates)
+        for target_i in [int(round(val * 100)), int(round(val * 10000))]:
+            results += memory.scan_int(
+                handle, target_i, candidates=self._mem_candidates)
+        results = list(dict.fromkeys(results))
         self._mem_scan_done(results)
 
     def _mem_read_xp(self):
         handle = self._mem_ensure_handle()
         if not handle or not self._mem_addr:
             return
+        # tenta float, int/100, int/10000
         val = memory.read_float(handle, self._mem_addr)
+        if val is not None:
+            if abs(val) < 1.1:
+                val = val * 100  # era 0-1 range
+        else:
+            ival = memory.read_int32(handle, self._mem_addr)
+            if ival is not None:
+                if ival > 10000:
+                    val = ival / 10000.0
+                elif ival > 0:
+                    val = ival / 100.0
         if val is None:
             self.xp_mem_status.configure(
                 text="Falha na leitura. Endereço pode ter mudado.", fg=RED)
@@ -1663,6 +1776,20 @@ class App(tk.Tk):
             self.xp_sdk_status.configure(
                 text="Não encontrou GNames/GObjects. O jogo está aberto?",
                 fg=RED)
+            return
+
+        if result.get("error") == "gnames_not_found":
+            probe = result.get("probe_count", 0)
+            if probe > 0:
+                self.xp_sdk_status.configure(
+                    text=f"GNames não encontrado mas 'ByteProperty' existe "
+                         f"({probe}x). Header diferente do padrão.",
+                    fg=ORANGE)
+            else:
+                self.xp_sdk_status.configure(
+                    text="Nomes UE4 não encontrados em plaintext. "
+                         "O jogo pode encriptar FNames.",
+                    fg=RED)
             return
 
         player_data = result.get("player_data", {})
@@ -3109,6 +3236,8 @@ class App(tk.Tk):
         try:
             if self._recorder:
                 self._recorder.stop()
+            if getattr(self, '_sniffer', None):
+                self._sniffer.stop()
             self.manager.stop_all()
         finally:
             self.destroy()

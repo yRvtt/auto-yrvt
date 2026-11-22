@@ -53,9 +53,12 @@ FUOBJ_ITEM_SIZE = 24
 FUOBJ_ITEM_OBJ  = 0x00
 
 # ── padrão conhecido das primeiras FNameEntries ─────────────────
-# "None" (4 chars) → header = 4<<1 = 0x0008
-# "ByteProperty" (12 chars) → header = 12<<1 = 0x0018
-_GNAMES_PATTERN = b'\x08\x00None\x18\x00ByteProperty'
+# UE4 4.27: header = Len<<6 | ProbeHash<<1 | bIsWide
+# "None" (4 chars): Len=4 → header high bits = 4<<6 = 0x0100, low 6 bits = probe<<1
+# Não podemos prever o probe hash, então buscamos o nome ASCII depois de um header
+# cujo Len (header>>6) == 4, seguido de "None"
+_PROBE_STRINGS = [b'ByteProperty', b'IntProperty', b'FloatProperty',
+                  b'BoolProperty', b'ObjectProperty']
 
 
 def _read_u16(handle, addr):
@@ -107,26 +110,33 @@ def find_gnames(handle, progress_fn=None):
 
 
 def _find_names_block0(handle, progress_fn=None):
-    """Varre memória procurando o padrão das primeiras FNameEntries."""
+    """Varre memória procurando o início do FNamePool Block[0] (formato 4.27)."""
     regions = list(memory._readable_regions(handle))
     total = sum(s for _, s in regions)
     scanned = 0
-    pattern = _GNAMES_PATTERN
-
+    # Busca "None" em ASCII; o header u16 antes tem Len>>6 == 4
+    probe = b'None'
     for base, size in regions:
         block_sz = min(size, 1 << 20)
-        overlap = len(pattern)
+        overlap = 20
         offset = 0
         while offset < size:
             chunk_sz = min(block_sz, size - offset)
             data = memory._read_bytes(handle, base + offset, chunk_sz)
             if data:
-                pos = data.find(pattern)
-                if pos >= 0:
-                    addr = base + offset + pos
-                    if _verify_block0(handle, addr):
-                        log.info("GNames block0 em 0x%X", addr)
-                        return addr
+                start = 0
+                while True:
+                    pos = data.find(probe, start)
+                    if pos < 0 or pos < 2:
+                        break
+                    # verifica header antes de "None"
+                    hdr = struct.unpack_from("<H", data, pos - 2)[0]
+                    if (hdr >> 6) == 4 and (hdr & 1) == 0:
+                        addr = base + offset + pos - 2
+                        if _verify_block0_427(handle, addr):
+                            log.info("GNames block0 em 0x%X", addr)
+                            return addr
+                    start = pos + 1
             scanned += chunk_sz
             offset += max(1, chunk_sz - overlap)
             if progress_fn and total > 0:
@@ -134,28 +144,58 @@ def _find_names_block0(handle, progress_fn=None):
     return None
 
 
-def _verify_block0(handle, addr):
-    """Verifica que o endereço é realmente o início de Block[0]."""
-    # Checa mais nomes além de None e ByteProperty
-    # Index 10 → byte offset 20 → IntProperty (11 chars, header 0x0016)
-    off = 20  # "None"(6) + "ByteProperty"(14) = 20 bytes
-    h = _read_u16(handle, addr + off)
-    if h is None:
-        return False
-    length = h >> 1
-    if length != 11:  # "IntProperty" = 11
-        return False
-    data = memory._read_bytes(handle, addr + off + 2, 11)
-    if data != b"IntProperty":
-        return False
+def _verify_block0_427(handle, addr):
+    """Verifica block0 no formato 4.27 (header = Len<<6 | probe<<1 | wide)."""
+    # entry 0 = "None" (4 chars), caminha pelas próximas entries e verifica nomes UE4
+    # entry size = 2 (header) + len, padded to 2
+    off = 0
+    expected = ["None", "ByteProperty", "IntProperty"]
+    for name in expected:
+        h = _read_u16(handle, addr + off)
+        if h is None:
+            return False
+        length = h >> 6
+        if length != len(name):
+            return False
+        data = memory._read_bytes(handle, addr + off + 2, length)
+        if data != name.encode('ascii'):
+            return False
+        entry_sz = 2 + length
+        if entry_sz % 2:
+            entry_sz += 1
+        off += entry_sz
+    return True
 
-    # Mais uma: index 17 → byte 34 → BoolProperty (12 chars, header 0x0018)
-    off2 = 34
-    h2 = _read_u16(handle, addr + off2)
-    if h2 is None or (h2 >> 1) != 12:
+
+def _count_plaintext_probe(handle):
+    """Conta quantas vezes 'ByteProperty' aparece em plaintext na memória."""
+    probe = b'ByteProperty'
+    count = 0
+    for base, size in memory._readable_regions(handle):
+        block_sz = min(size, 1 << 20)
+        offset = 0
+        while offset < size:
+            chunk_sz = min(block_sz, size - offset)
+            data = memory._read_bytes(handle, base + offset, chunk_sz)
+            if data:
+                count += data.count(probe)
+                if count > 0:
+                    return count  # basta saber se existe
+            offset += chunk_sz
+    return count
+
+
+def _verify_block0_flexible(handle, addr):
+    """Verifica block0 sem depender do formato exato do header."""
+    # Lê 100 bytes a partir do candidato e procura nomes UE4 conhecidos
+    data = memory._read_bytes(handle, addr, 200)
+    if not data:
         return False
-    data2 = memory._read_bytes(handle, addr + off2 + 2, 12)
-    return data2 == b"BoolProperty"
+    found = 0
+    for name in [b'None', b'ByteProperty', b'IntProperty', b'BoolProperty']:
+        if name in data:
+            found += 1
+    return found >= 3
 
 
 def _find_allocator(handle, block0_addr):
@@ -197,6 +237,41 @@ def _verify_allocator(handle, addr, block0_addr):
     return b0 == block0_addr
 
 
+# FNamePool estático em Mir4G.exe (build de 2025-11-06): RVA do singleton.
+# Não há criptografia: layout 4.27 padrão (ver re_analysis.md).
+MIR4_GNAMES_RVA = 0x81B5180
+
+
+def module_base(handle):
+    """Base do módulo principal (o .exe) do processo."""
+    import ctypes
+    from ctypes import wintypes
+    psapi = ctypes.windll.psapi
+    hMods = (ctypes.c_void_p * 1024)()
+    cbNeeded = wintypes.DWORD()
+    ok = psapi.EnumProcessModulesEx(
+        ctypes.c_void_p(handle), hMods, ctypes.sizeof(hMods),
+        ctypes.byref(cbNeeded), 0x03)
+    if not ok:
+        err = ctypes.get_last_error() if hasattr(ctypes, 'get_last_error') else 0
+        log.warning("EnumProcessModulesEx falhou (err=%d)", err)
+        return None
+    if cbNeeded.value < 8:
+        return None
+    return hMods[0]
+
+
+def find_gnames_static(handle, base=None, rva=MIR4_GNAMES_RVA):
+    """GNames via RVA fixo do FNamePool (sem scan). Mesmo formato de find_gnames."""
+    base = base or module_base(handle)
+    pool = base + rva
+    blocks = _read_blocks(handle, pool)
+    if not blocks or not blocks[0]:
+        return None
+    g = {"allocator": pool, "blocks": blocks}
+    return g if resolve_name(handle, g, 0) == "None" else None
+
+
 def _read_blocks(handle, allocator_addr):
     """Lê os ponteiros dos blocos do FNameEntryAllocator."""
     cur_block = _read_u32(handle, allocator_addr + ALLOC_CUR_BLK)
@@ -222,8 +297,9 @@ def resolve_name(handle, gnames, name_index):
     header = _read_u16(handle, base)
     if header is None:
         return None
+    # 4.27: bIsWide:1 | LowercaseProbeHash:5 | Len:10  (Len = header >> 6)
     is_wide = header & 1
-    length = header >> 1
+    length = header >> 6
     if length <= 0 or length > 1024:
         return None
     name_addr = base + 2
@@ -496,9 +572,16 @@ def full_scan(handle, progress_fn=None):
         if progress_fn:
             progress_fn("gnames", pct)
 
-    gnames = find_gnames(handle, gn_progress)
+    # tenta RVA estático primeiro (instantâneo)
+    gnames = find_gnames_static(handle)
+    if gnames:
+        log.info("GNames via RVA estático OK")
+    else:
+        gnames = find_gnames(handle, gn_progress)
     if not gnames:
-        return None
+        count = _count_plaintext_probe(handle)
+        log.warning("GNames falhou. 'ByteProperty' plaintext encontrado %d vezes", count)
+        return {"error": "gnames_not_found", "probe_count": count}
 
     if progress_fn:
         progress_fn("gobjects", 0)
