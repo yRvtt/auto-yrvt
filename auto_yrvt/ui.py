@@ -1408,8 +1408,7 @@ class App(tk.Tk):
         self._manual_xp_toggle_btn = HoverButton(
             inner, "Sessão manual (digitado)  ▸",
             self._toggle_manual_xp, bg=SURFACE, hover=SURFACE2,
-            fg=MUTED, font=(FONT, 8), padx=0, pady=2, bd=0,
-            relief="flat")
+            fg=MUTED, font=(FONT, 8), padx=0, pady=2)
         self._manual_xp_toggle_btn.pack(anchor="w")
         self._manual_xp_body = tk.Frame(inner, bg=SURFACE)
 
@@ -1422,8 +1421,7 @@ class App(tk.Tk):
         self._adv_xp_toggle_btn = HoverButton(
             inner, "Métodos avançados (memória / SDK)  ▸",
             self._toggle_adv_xp, bg=SURFACE, hover=SURFACE2,
-            fg=MUTED, font=(FONT, 8), padx=0, pady=2, bd=0,
-            relief="flat")
+            fg=MUTED, font=(FONT, 8), padx=0, pady=2)
         self._adv_xp_toggle_btn.pack(anchor="w")
         self._adv_xp_body = tk.Frame(inner, bg=SURFACE)
 
