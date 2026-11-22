@@ -7,6 +7,7 @@ Requer admin.
 """
 
 import logging
+import math
 import os
 import struct
 import subprocess
@@ -23,6 +24,15 @@ OP_POWER   = 0x6102
 OP_HP_MP   = 0x6402
 
 _CAPTURE_INTERVAL = 5
+
+# XP needed to level up, derived from MIR4 Wiki data points.
+# Verified: lv100=1_818_638_670, lv120=6_264_805_340.
+_XP_A = 3_737_117
+_XP_B = 0.06185
+
+
+def xp_for_level(level):
+    return round(_XP_A * math.exp(_XP_B * level))
 
 
 def _decode_varint(data, pos):
@@ -130,6 +140,10 @@ class GameData:
                 self.hp = fields.get(3, 0)
                 self.mp_max = fields.get(9, 0)
 
+    def accumulated_base_xp(self):
+        with self._lock:
+            return sum(b for _, b, _ in self.xp_history)
+
     def snapshot(self):
         with self._lock:
             return {
@@ -142,6 +156,7 @@ class GameData:
                 'hp_max': self.hp_max,
                 'mp_max': self.mp_max,
                 'xp_count': len(self.xp_history),
+                'xp_accumulated': sum(b for _, b, _ in self.xp_history),
             }
 
     def xp_rate_per_hour(self):

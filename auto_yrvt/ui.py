@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import win32api
 import win32gui
@@ -1315,8 +1315,9 @@ class App(tk.Tk):
         self.xp_sniff_indicator.pack(side="right")
 
         tk.Label(inner,
-                 text="Informe o spot e sua % de XP atual, inicie e "
-                      "deixe o macro rodando. Ao parar, informe a % final.",
+                 text="Selecione spot e nível, inicie o sniffer e "
+                      "deixe o macro rodando. O delta % é calculado "
+                      "automaticamente.",
                  bg=SURFACE, fg=MUTED, font=(FONT, 8), justify="left",
                  wraplength=680).pack(anchor="w", pady=(4, 8))
 
@@ -1325,16 +1326,14 @@ class App(tk.Tk):
         tk.Label(row, text="Spot", bg=SURFACE, fg=MUTED,
                  font=(FONT, 9)).pack(side="left")
         self._entry(row, self.xp_spot_var, 20).pack(side="left", padx=(6, 14))
-        tk.Label(row, text="XP início %", bg=SURFACE, fg=MUTED,
+        tk.Label(row, text="Nível", bg=SURFACE, fg=MUTED,
                  font=(FONT, 9)).pack(side="left")
-        self.xp_sniff_start_var = tk.StringVar()
-        self._entry(row, self.xp_sniff_start_var, 8).pack(
-            side="left", padx=(6, 14))
-        tk.Label(row, text="XP fim %", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 9)).pack(side="left")
-        self.xp_sniff_end_var = tk.StringVar()
-        self._entry(row, self.xp_sniff_end_var, 8).pack(
-            side="left", padx=(6, 0))
+        self.xp_level_var = tk.StringVar(value=str(self.cfg.xp_level))
+        level_cb = ttk.Combobox(row, textvariable=self.xp_level_var,
+                                values=[str(i) for i in range(60, 201)],
+                                width=5, state="readonly")
+        level_cb.pack(side="left", padx=(6, 0))
+        level_cb.bind("<<ComboboxSelected>>", self._on_level_change)
 
         actions = tk.Frame(inner, bg=SURFACE)
         actions.pack(fill="x", pady=(10, 0))
@@ -1362,10 +1361,13 @@ class App(tk.Tk):
             ("kills", "Eventos XP"),
             ("kills_min", "Kills / Min"),
             ("elapsed", "Tempo"),
+            ("delta_pct", "Delta %"),
+            ("rate_pct", "%/h"),
         ]):
             col = i % 4
+            r = i // 4
             cell = tk.Frame(stats_frame, bg=SURFACE2)
-            cell.grid(row=0, column=col, sticky="w", padx=(0, 30), pady=2)
+            cell.grid(row=r, column=col, sticky="w", padx=(0, 30), pady=2)
             tk.Label(cell, text=label, bg=SURFACE2, fg=MUTED,
                      font=(FONT, 7, "bold")).pack(anchor="w")
             lbl = tk.Label(cell, text="—", bg=SURFACE2, fg=FG,
@@ -1403,13 +1405,13 @@ class App(tk.Tk):
 
         self._refresh_xp_history()
 
-    @staticmethod
-    def _parse_pct(text):
+    def _on_level_change(self, _event=None):
         try:
-            value = str(text).replace("%", "").replace(",", ".").strip()
-            return float(value)
-        except Exception:
-            return None
+            lv = int(self.xp_level_var.get())
+        except ValueError:
+            return
+        self.cfg.xp_level = lv
+        self.cfg.save()
 
     def _sniff_toggle(self):
         if self._sniffer and self._sniffer.running:
@@ -1471,6 +1473,17 @@ class App(tk.Tk):
         secs = int(elapsed) % 60
         sl["elapsed"].configure(text=f"{mins:02d}:{secs:02d}", fg=FG)
 
+        xp_needed = sniffer.xp_for_level(self.cfg.xp_level)
+        accumulated = snap.get('xp_accumulated', 0)
+        if xp_needed > 0 and accumulated > 0:
+            delta_pct = accumulated / xp_needed * 100
+            sl["delta_pct"].configure(
+                text=f"+{delta_pct:.4f}%", fg=ACCENT)
+            if elapsed > 10:
+                rate = delta_pct / (elapsed / 3600)
+                sl["rate_pct"].configure(
+                    text=f"{rate:.2f}%/h", fg=ACCENT)
+
         self.xp_sniff_status.configure(
             text=f"Capturando...  |  "
                  f"Pacotes: {self._sniffer.stats['packets']:,}",
@@ -1484,24 +1497,15 @@ class App(tk.Tk):
             return
         hist = self._sniffer.data.xp_history
         if not hist:
-            self.toast("Nenhum mob morto ainda.", "warning")
+            self.toast("Nenhum evento XP capturado.", "warning")
             return
         snap = self._sniffer.data.snapshot()
         spot = self.xp_spot_var.get().strip() or "Spot"
         total_secs = int(time.time() - (self._sniff_spot_start or time.time()))
 
-        start_pct = self._parse_pct(self.xp_sniff_start_var.get())
-        end_pct = self._parse_pct(self.xp_sniff_end_var.get())
-        if start_pct is None or end_pct is None:
-            self.toast("Informe a % de XP inicial e final.", "warning")
-            return
-        delta = end_pct - start_pct
-        if delta < 0:
-            levels = simpledialog.askinteger(
-                "Upou?", "Quantos níveis subiu?",
-                initialvalue=1, minvalue=1, maxvalue=50)
-            if levels:
-                delta += levels * 100
+        xp_needed = sniffer.xp_for_level(self.cfg.xp_level)
+        accumulated = snap.get('xp_accumulated', 0)
+        delta = accumulated / xp_needed * 100 if xp_needed > 0 else 0
 
         kills_min = 0.0
         if len(hist) >= 2:
@@ -1516,13 +1520,12 @@ class App(tk.Tk):
             "start_ts": self._sniff_spot_start,
             "end_ts": time.time(),
             "seconds": total_secs,
-            "start_pct": start_pct,
-            "end_pct": end_pct,
             "delta": round(delta, 4),
             "rate": round(rate, 2),
             "xp_per_kill": snap['xp_base'],
             "kills_min": round(kills_min, 1),
             "kills": len(hist),
+            "level": self.cfg.xp_level,
             "source": "sniffer",
         }
         self.cfg.xp_sessions.append(session)
@@ -1531,8 +1534,8 @@ class App(tk.Tk):
         self._draw_xp_chart()
         self.xp_sniff_save_btn.configure(state="disabled")
         self.toast(
-            f"'{spot}': {start_pct:.2f}% → {end_pct:.2f}%  "
-            f"(+{delta:.2f}%, {len(hist)} kills)", "success")
+            f"'{spot}': +{delta:.4f}% ({len(hist)} eventos, "
+            f"{rate:.2f}%/h)", "success")
 
     def _xp_clear(self):
         if not self.cfg.xp_sessions:
@@ -1589,8 +1592,8 @@ class App(tk.Tk):
 
         header = tk.Frame(self.xp_sessions_box, bg=SURFACE)
         header.pack(fill="x", pady=(0, 2))
-        for text, width in (("SPOT", 16), ("DURAÇÃO", 8), ("INÍCIO", 8),
-                            ("FIM", 8), ("+XP%", 8), ("%/H", 8),
+        for text, width in (("SPOT", 16), ("DURAÇÃO", 8), ("LV", 5),
+                            ("+XP%", 10), ("%/H", 8),
                             ("KILLS", 7), ("XP/KILL", 10)):
             tk.Label(header, text=text, bg=SURFACE, fg=MUTED,
                      font=(FONT, 7, "bold"), width=width, anchor="w").pack(
@@ -1605,17 +1608,12 @@ class App(tk.Tk):
             tk.Label(row, text=format_duration(session.get("seconds", 0)),
                      bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
                      anchor="w").pack(side="left")
-            sp = session.get("start_pct")
-            ep = session.get("end_pct")
-            tk.Label(row, text=f"{sp:.2f}%" if sp is not None else "—",
-                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
-                     anchor="w").pack(side="left")
-            tk.Label(row, text=f"{ep:.2f}%" if ep is not None else "—",
-                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
-                     anchor="w").pack(side="left")
+            lv = session.get("level", "—")
+            tk.Label(row, text=str(lv), bg=SURFACE, fg=MUTED,
+                     font=(FONT, 8), width=5, anchor="w").pack(side="left")
             delta = session.get("delta", 0)
-            tk.Label(row, text=f"+{delta:.2f}%", bg=SURFACE, fg=GREEN,
-                     font=(FONT, 8), width=8, anchor="w").pack(side="left")
+            tk.Label(row, text=f"+{delta:.4f}%", bg=SURFACE, fg=GREEN,
+                     font=(FONT, 8), width=10, anchor="w").pack(side="left")
             rate = session.get("rate", 0)
             tk.Label(row, text=f"{rate:.2f}", bg=SURFACE,
                      fg=ACCENT if rate == best else FG,

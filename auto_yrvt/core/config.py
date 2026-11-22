@@ -168,6 +168,7 @@ class Config:
                          "g1": [0, 0], "g2": [0, 0],
                          "pre": 3.0, "between": 6.0}
         self.xp_sessions = []
+        self.xp_level = 120
         self._lock = threading.RLock()
         self.load()
 
@@ -202,6 +203,9 @@ class Config:
         if isinstance(sessions, list):
             self.xp_sessions = [s for s in sessions
                                 if isinstance(s, dict)][-50:]
+        lv = data.get("xp_level")
+        if isinstance(lv, int) and 1 <= lv <= 300:
+            self.xp_level = lv
 
         if not self.profiles:
             self._migrate_legacy()
@@ -235,6 +239,7 @@ class Config:
                 "layout": self.layout,
                 "launcher": self.launcher,
                 "xp_sessions": self.xp_sessions,
+                "xp_level": self.xp_level,
             }
             tmp = self.path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
