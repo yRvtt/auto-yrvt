@@ -1324,8 +1324,8 @@ class App(tk.Tk):
         self.xp_sniff_indicator.pack(side="right")
 
         tk.Label(inner,
-                 text="Captura pacotes do MIR4 em tempo real. "
-                      "Informe o nome do spot, inicie e deixe o macro rodando.",
+                 text="Informe o spot e sua % de XP atual, inicie e "
+                      "deixe o macro rodando. Ao parar, informe a % final.",
                  bg=SURFACE, fg=MUTED, font=(FONT, 8), justify="left",
                  wraplength=680).pack(anchor="w", pady=(4, 8))
 
@@ -1333,13 +1333,26 @@ class App(tk.Tk):
         row.pack(fill="x")
         tk.Label(row, text="Spot", bg=SURFACE, fg=MUTED,
                  font=(FONT, 9)).pack(side="left")
-        self._entry(row, self.xp_spot_var, 24).pack(side="left", padx=(6, 14))
+        self._entry(row, self.xp_spot_var, 20).pack(side="left", padx=(6, 14))
+        tk.Label(row, text="XP início %", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 9)).pack(side="left")
+        self.xp_sniff_start_var = tk.StringVar()
+        self._entry(row, self.xp_sniff_start_var, 8).pack(
+            side="left", padx=(6, 14))
+        tk.Label(row, text="XP fim %", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 9)).pack(side="left")
+        self.xp_sniff_end_var = tk.StringVar()
+        self._entry(row, self.xp_sniff_end_var, 8).pack(
+            side="left", padx=(6, 0))
+
+        actions = tk.Frame(inner, bg=SURFACE)
+        actions.pack(fill="x", pady=(10, 0))
         self.xp_sniff_btn = HoverButton(
-            row, "Iniciar Sniffer", self._sniff_toggle, bg=ACCENT,
+            actions, "Iniciar Sniffer", self._sniff_toggle, bg=ACCENT,
             hover=ACCENT2, fg=BG, font=(FONT, 9, "bold"), padx=14, pady=5)
         self.xp_sniff_btn.pack(side="left")
         self.xp_sniff_save_btn = HoverButton(
-            row, "Salvar sessao", self._sniff_save, bg="#1f4f3a",
+            actions, "Salvar sessao", self._sniff_save, bg="#1f4f3a",
             hover="#27634a", font=(FONT, 9), padx=10, pady=5,
             state="disabled")
         self.xp_sniff_save_btn.pack(side="left", padx=6)
@@ -1355,16 +1368,13 @@ class App(tk.Tk):
         self._sniff_labels = {}
         for i, (key, label) in enumerate([
             ("xp_kill", "XP / Kill"),
+            ("kills", "Mobs mortos"),
             ("kills_min", "Kills / Min"),
-            ("xp_hour", "XP / Hora"),
-            ("power", "Power"),
-            ("hp", "HP"),
             ("elapsed", "Tempo"),
         ]):
-            col = i % 3
-            rw = i // 3
+            col = i % 4
             cell = tk.Frame(stats_frame, bg=SURFACE2)
-            cell.grid(row=rw, column=col, sticky="w", padx=(0, 30), pady=2)
+            cell.grid(row=0, column=col, sticky="w", padx=(0, 30), pady=2)
             tk.Label(cell, text=label, bg=SURFACE2, fg=MUTED,
                      font=(FONT, 7, "bold")).pack(anchor="w")
             lbl = tk.Label(cell, text="—", bg=SURFACE2, fg=FG,
@@ -1599,7 +1609,6 @@ class App(tk.Tk):
         if not self._sniffer or not self._sniffer.running:
             return
         snap = self._sniffer.data.snapshot()
-        rate = self._sniffer.data.xp_rate_per_hour()
         elapsed = time.time() - (self._sniff_spot_start or time.time())
         hist = self._sniffer.data.xp_history
         kills_min = 0.0
@@ -1609,25 +1618,19 @@ class App(tk.Tk):
                 kills_min = len(hist) / (dt / 60)
 
         sl = self._sniff_labels
-        if snap['xp_total'] > 0:
+        if snap['xp_base'] > 0:
             sl["xp_kill"].configure(
-                text=f"{snap['xp_total']:,}", fg=ACCENT)
+                text=f"{snap['xp_base']:,}", fg=ACCENT)
+        sl["kills"].configure(text=f"{snap['xp_count']}", fg=FG)
         if kills_min > 0:
             sl["kills_min"].configure(text=f"{kills_min:.1f}", fg=FG)
-        if rate > 0:
-            sl["xp_hour"].configure(text=f"{rate:,.0f}", fg=ACCENT)
-        if snap['power'] > 0:
-            sl["power"].configure(text=f"{snap['power']:,}", fg=FG)
-        if snap['hp_max'] > 0:
-            sl["hp"].configure(
-                text=f"{snap['hp']:,}/{snap['hp_max']:,}", fg=FG)
 
         mins = int(elapsed) // 60
         secs = int(elapsed) % 60
         sl["elapsed"].configure(text=f"{mins:02d}:{secs:02d}", fg=FG)
 
         self.xp_sniff_status.configure(
-            text=f"Eventos XP: {snap['xp_count']}  |  "
+            text=f"Capturando...  |  "
                  f"Pacotes: {self._sniffer.stats['packets']:,}",
             fg=GREEN)
 
@@ -1638,30 +1641,46 @@ class App(tk.Tk):
             self.toast("Nenhuma captura ativa.", "warning")
             return
         hist = self._sniffer.data.xp_history
-        if len(hist) < 2:
-            self.toast("Precisa de pelo menos 2 kills para salvar.", "warning")
+        if not hist:
+            self.toast("Nenhum mob morto ainda.", "warning")
             return
         snap = self._sniffer.data.snapshot()
-        dt = hist[-1][0] - hist[0][0]
-        if dt < 5:
-            self.toast("Tempo muito curto.", "warning")
-            return
-        kills_min = len(hist) / (dt / 60)
-        xp_per_kill = snap['xp_total']
-        xp_abs_hour = self._sniffer.data.xp_rate_per_hour()
         spot = self.xp_spot_var.get().strip() or "Spot"
         total_secs = int(time.time() - (self._sniff_spot_start or time.time()))
+
+        start_pct = self._parse_pct(self.xp_sniff_start_var.get())
+        end_pct = self._parse_pct(self.xp_sniff_end_var.get())
+        if start_pct is None or end_pct is None:
+            self.toast("Informe a % de XP inicial e final.", "warning")
+            return
+        delta = end_pct - start_pct
+        if delta < 0:
+            levels = simpledialog.askinteger(
+                "Upou?", "Quantos níveis subiu?",
+                initialvalue=1, minvalue=1, maxvalue=50)
+            if levels:
+                delta += levels * 100
+
+        kills_min = 0.0
+        if len(hist) >= 2:
+            dt = hist[-1][0] - hist[0][0]
+            if dt > 5:
+                kills_min = len(hist) / (dt / 60)
+
+        rate = delta / (total_secs / 3600) if total_secs > 0 else 0
 
         session = {
             "spot": spot,
             "start_ts": self._sniff_spot_start,
             "end_ts": time.time(),
             "seconds": total_secs,
-            "xp_per_kill": xp_per_kill,
+            "start_pct": start_pct,
+            "end_pct": end_pct,
+            "delta": round(delta, 4),
+            "rate": round(rate, 2),
+            "xp_per_kill": snap['xp_base'],
             "kills_min": round(kills_min, 1),
-            "xp_abs_hour": int(xp_abs_hour),
             "kills": len(hist),
-            "power": snap['power'],
             "source": "sniffer",
         }
         self.cfg.xp_sessions.append(session)
@@ -1669,7 +1688,9 @@ class App(tk.Tk):
         self._rebuild_xp_sessions()
         self._draw_xp_chart()
         self.xp_sniff_save_btn.configure(state="disabled")
-        self.toast(f"Sessão '{spot}' salva ({len(hist)} kills).", "success")
+        self.toast(
+            f"'{spot}': {start_pct:.2f}% → {end_pct:.2f}%  "
+            f"(+{delta:.2f}%, {len(hist)} kills)", "success")
 
     def _mem_ensure_handle(self):
         inst = self._sel_inst()
@@ -1998,25 +2019,17 @@ class App(tk.Tk):
             self.xp_best_label.configure(text="")
             return
 
-        def _sort_key(s):
-            if s.get("source") == "sniffer":
-                return s.get("xp_abs_hour", 0)
-            return s.get("rate", 0) * 1e9
-
-        best_session = max(sessions, key=_sort_key)
-        if best_session.get("source") == "sniffer":
-            self.xp_best_label.configure(
-                text=f"Melhor: {best_session.get('spot', '?')}  ·  "
-                     f"{best_session.get('xp_abs_hour', 0):,} XP/h")
-        else:
-            self.xp_best_label.configure(
-                text=f"Melhor: {best_session.get('spot', '?')}  ·  "
-                     f"{best_session.get('rate', 0):.1f}%/h")
+        best = max(s.get("rate", 0) for s in sessions)
+        best_session = max(sessions, key=lambda s: s.get("rate", 0))
+        self.xp_best_label.configure(
+            text=f"Melhor: {best_session.get('spot', '?')}  ·  "
+                 f"{best:.2f}%/h")
 
         header = tk.Frame(self.xp_sessions_box, bg=SURFACE)
         header.pack(fill="x", pady=(0, 2))
-        for text, width in (("SPOT", 18), ("DURAÇÃO", 8), ("XP/KILL", 10),
-                            ("KILLS/M", 8), ("XP/H", 12), ("FONTE", 7)):
+        for text, width in (("SPOT", 16), ("DURAÇÃO", 8), ("INÍCIO", 8),
+                            ("FIM", 8), ("+XP%", 8), ("%/H", 8),
+                            ("KILLS", 7), ("XP/KILL", 10)):
             tk.Label(header, text=text, bg=SURFACE, fg=MUTED,
                      font=(FONT, 7, "bold"), width=width, anchor="w").pack(
                 side="left")
@@ -2024,43 +2037,36 @@ class App(tk.Tk):
             real_index = len(sessions) - 1 - index
             row = tk.Frame(self.xp_sessions_box, bg=SURFACE)
             row.pack(fill="x", pady=2)
-            tk.Label(row, text=str(session.get("spot", "?"))[:18], bg=SURFACE,
-                     fg=FG, font=(FONT, 9, "bold"), width=18,
+            tk.Label(row, text=str(session.get("spot", "?"))[:16], bg=SURFACE,
+                     fg=FG, font=(FONT, 9, "bold"), width=16,
                      anchor="w").pack(side="left")
             tk.Label(row, text=format_duration(session.get("seconds", 0)),
                      bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
                      anchor="w").pack(side="left")
-            if session.get("source") == "sniffer":
-                xpk = session.get("xp_per_kill", 0)
-                km = session.get("kills_min", 0)
-                xph = session.get("xp_abs_hour", 0)
-                tk.Label(row, text=f"{xpk:,}", bg=SURFACE, fg=GREEN,
-                         font=(FONT, 8), width=10, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text=f"{km:.1f}", bg=SURFACE, fg=FG,
-                         font=(FONT, 8), width=8, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text=f"{xph:,}", bg=SURFACE, fg=ACCENT,
-                         font=(FONT, 8, "bold"), width=12, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text="sniff", bg=SURFACE, fg=MUTED,
-                         font=(FONT, 7), width=7, anchor="w").pack(
-                    side="left")
-            else:
-                delta = session.get("delta", 0)
-                rate = session.get("rate", 0)
-                tk.Label(row, text=f"+{delta:.2f}%", bg=SURFACE, fg=GREEN,
-                         font=(FONT, 8), width=10, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text="—", bg=SURFACE, fg=MUTED,
-                         font=(FONT, 8), width=8, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text=f"{rate:.1f}%/h", bg=SURFACE, fg=FG,
-                         font=(FONT, 8), width=12, anchor="w").pack(
-                    side="left")
-                tk.Label(row, text="manual", bg=SURFACE, fg=MUTED,
-                         font=(FONT, 7), width=7, anchor="w").pack(
-                    side="left")
+            sp = session.get("start_pct")
+            ep = session.get("end_pct")
+            tk.Label(row, text=f"{sp:.2f}%" if sp is not None else "—",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=f"{ep:.2f}%" if ep is not None else "—",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
+                     anchor="w").pack(side="left")
+            delta = session.get("delta", 0)
+            tk.Label(row, text=f"+{delta:.2f}%", bg=SURFACE, fg=GREEN,
+                     font=(FONT, 8), width=8, anchor="w").pack(side="left")
+            rate = session.get("rate", 0)
+            tk.Label(row, text=f"{rate:.2f}", bg=SURFACE,
+                     fg=ACCENT if rate == best else FG,
+                     font=(FONT, 8, "bold"), width=8,
+                     anchor="w").pack(side="left")
+            kills = session.get("kills", 0)
+            tk.Label(row, text=str(kills) if kills else "—",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=7,
+                     anchor="w").pack(side="left")
+            xpk = session.get("xp_per_kill", 0)
+            tk.Label(row, text=f"{xpk:,}" if xpk else "—",
+                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=10,
+                     anchor="w").pack(side="left")
             HoverButton(row, "×", lambda i=real_index: self._xp_remove(i),
                         bg=SURFACE, hover="#3a2024", fg=RED,
                         font=(FONT, 9), padx=4, pady=1).pack(side="right")
@@ -2077,48 +2083,26 @@ class App(tk.Tk):
                                text="Sem dados: inicie o sniffer e rode o macro.")
             return
 
-        def _chart_val(s):
-            if s.get("source") == "sniffer":
-                return s.get("xp_abs_hour", 0)
-            return s.get("rate", 0) * 1e9
-
-        sorted_s = sorted(sessions, key=_chart_val, reverse=True)[:8]
-        has_sniffer = any(s.get("source") == "sniffer" for s in sorted_s)
+        sorted_s = sorted(sessions, key=lambda s: s.get("rate", 0),
+                          reverse=True)[:8]
 
         width = max(200, canvas.winfo_width())
         height = max(120, canvas.winfo_height())
         row_h = min(24, max(16, (height - 18) // max(1, len(sorted_s))))
         label_w = min(150, int(width * 0.25))
         bar_x = label_w + 8
-        bar_max = max(30, width - bar_x - 100)
+        bar_max = max(30, width - bar_x - 80)
 
-        if has_sniffer:
-            best_val = max(s.get("xp_abs_hour", 0)
-                          for s in sorted_s
-                          if s.get("source") == "sniffer") or 1
-        else:
-            best_val = max(s.get("rate", 0) for s in sorted_s) or 1
+        best_val = max(s.get("rate", 0) for s in sorted_s) or 1
 
         for i, session in enumerate(sorted_s):
             y = 8 + i * row_h
             spot = str(session.get("spot", "?"))[:18]
             canvas.create_text(4, y + row_h / 2 - 2, anchor="w",
                                text=spot, fill=FG, font=(FONT, 8))
-
-            if session.get("source") == "sniffer":
-                val = session.get("xp_abs_hour", 0)
-                bar_w = int(bar_max * min(1.0, val / best_val)) if best_val else 0
-                label = f"{val:,} XP/h"
-                if session.get("kills_min"):
-                    label += f"  ({session['kills_min']:.0f}k/m)"
-            else:
-                val = session.get("rate", 0)
-                if has_sniffer:
-                    bar_w = int(bar_max * 0.1)
-                else:
-                    bar_w = int(bar_max * min(1.0, val / best_val))
-                label = f"{val:.1f}%/h"
-
+            val = session.get("rate", 0)
+            bar_w = int(bar_max * min(1.0, val / best_val)) if best_val else 0
+            label = f"{val:.2f}%/h"
             color = ACCENT if i == 0 else SURFACE3
             canvas.create_rectangle(bar_x, y + 3, bar_x + max(2, bar_w),
                                     y + row_h - 3, fill=color, outline="")
