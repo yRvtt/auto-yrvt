@@ -17,12 +17,12 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import memory, sniffer, ue4, updater
+from . import sniffer, updater
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
     find_launcher_window, format_duration, is_admin, launch_two, open_launcher,
-    uia_available, window_sort_key, xp_rate,
+    uia_available, window_sort_key,
 )
 
 BG = "#0a0d12"
@@ -1296,20 +1296,11 @@ class App(tk.Tk):
         scroll.pack(fill="both", expand=True)
         body = scroll.inner
 
-        self._xp_active = None
         self._xp_sig = None
         self._sniffer = None
         self._sniff_timer = None
         self._sniff_spot_start = None
-        self._mem_handle = None
-        self._mem_pid = None
-        self._mem_candidates = None
-        self._mem_addr = None
-        self._ue4_result = None
-        self.xp_mem_value_var = tk.StringVar()
         self.xp_spot_var = tk.StringVar(value="Spot 1")
-        self.xp_start_var = tk.StringVar()
-        self.xp_end_var = tk.StringVar()
 
 
         # ── CARD 1: SNIFFER (principal) ──
@@ -1368,7 +1359,7 @@ class App(tk.Tk):
         self._sniff_labels = {}
         for i, (key, label) in enumerate([
             ("xp_kill", "XP / Kill"),
-            ("kills", "Mobs mortos"),
+            ("kills", "Eventos XP"),
             ("kills_min", "Kills / Min"),
             ("elapsed", "Tempo"),
         ]):
@@ -1410,143 +1401,7 @@ class App(tk.Tk):
         self.xp_sessions_box = tk.Frame(inner, bg=SURFACE)
         self.xp_sessions_box.pack(fill="x", pady=(6, 0))
 
-        # ── CARD 4: SESSÃO MANUAL (colapsável) ──
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        self._manual_xp_inner = inner
-        self._manual_xp_visible = False
-        self._manual_xp_toggle_btn = HoverButton(
-            inner, "Sessão manual (digitado)  ▸",
-            self._toggle_manual_xp, bg=SURFACE, hover=SURFACE2,
-            fg=MUTED, font=(FONT, 8), padx=0, pady=2)
-        self._manual_xp_toggle_btn.pack(anchor="w")
-        self._manual_xp_body = tk.Frame(inner, bg=SURFACE)
-
-        self._build_manual_xp(self._manual_xp_body)
-
-        # ── CARD 5: MEMÓRIA / SDK (colapsável) ──
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        self._adv_xp_visible = False
-        self._adv_xp_toggle_btn = HoverButton(
-            inner, "Métodos avançados (memória / SDK)  ▸",
-            self._toggle_adv_xp, bg=SURFACE, hover=SURFACE2,
-            fg=MUTED, font=(FONT, 8), padx=0, pady=2)
-        self._adv_xp_toggle_btn.pack(anchor="w")
-        self._adv_xp_body = tk.Frame(inner, bg=SURFACE)
-
-        self._build_adv_xp(self._adv_xp_body)
-
-        self._update_xp_ui()
-
-    def _toggle_manual_xp(self):
-        self._manual_xp_visible = not self._manual_xp_visible
-        arrow = "▾" if self._manual_xp_visible else "▸"
-        self._manual_xp_toggle_btn.configure(
-            text=f"Sessão manual (digitado)  {arrow}")
-        if self._manual_xp_visible:
-            self._manual_xp_body.pack(fill="x", pady=(6, 0))
-        else:
-            self._manual_xp_body.pack_forget()
-
-    def _toggle_adv_xp(self):
-        self._adv_xp_visible = not self._adv_xp_visible
-        arrow = "▾" if self._adv_xp_visible else "▸"
-        self._adv_xp_toggle_btn.configure(
-            text=f"Métodos avançados (memória / SDK)  {arrow}")
-        if self._adv_xp_visible:
-            self._adv_xp_body.pack(fill="x", pady=(6, 0))
-        else:
-            self._adv_xp_body.pack_forget()
-
-    def _build_manual_xp(self, body):
-        row = tk.Frame(body, bg=SURFACE)
-        row.pack(fill="x", pady=(4, 0))
-        tk.Label(row, text="XP inicial (%)", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_start_var, 8).pack(side="left", padx=(4, 14))
-        tk.Label(row, text="XP final (%)", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_end_var, 8).pack(side="left", padx=(4, 14))
-
-        actions = tk.Frame(body, bg=SURFACE)
-        actions.pack(fill="x", pady=(8, 0))
-        self.xp_start_btn = HoverButton(
-            actions, "Iniciar sessão", self._xp_start, bg=ACCENT,
-            hover=ACCENT2, fg=BG, font=(FONT, 9, "bold"), padx=12, pady=5)
-        self.xp_start_btn.pack(side="left")
-        self.xp_stop_btn = HoverButton(
-            actions, "Finalizar e calcular", self._xp_stop, bg="#1f4f3a",
-            hover="#27634a", font=(FONT, 9), padx=12, pady=5,
-            state="disabled")
-        self.xp_stop_btn.pack(side="left", padx=6)
-        self.xp_cancel_btn = HoverButton(
-            actions, "Cancelar", self._xp_cancel, bg="#3a2024",
-            hover="#4a282e", fg=RED, font=(FONT, 9), padx=10, pady=5,
-            state="disabled")
-        self.xp_cancel_btn.pack(side="left")
-        self.xp_active_label = tk.Label(
-            body, text="Nenhuma sessão ativa.", bg=SURFACE, fg=MUTED,
-            font=(FONT, 9), anchor="w")
-        self.xp_active_label.pack(fill="x", pady=(8, 0))
-
-        tk.Label(body,
-                 text="Informe manualmente a % de XP no início e no fim.",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
-                 justify="left").pack(anchor="w", pady=(6, 0))
-
-    def _build_adv_xp(self, body):
-        tk.Label(body, text="LEITURA POR MEMÓRIA",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(
-            anchor="w", pady=(4, 0))
-        self.xp_mem_status = tk.Label(
-            body, text="Nenhum endereço encontrado.",
-            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w", justify="left")
-        self.xp_mem_status.pack(fill="x", pady=(4, 6))
-        row = tk.Frame(body, bg=SURFACE)
-        row.pack(fill="x")
-        tk.Label(row, text="XP atual (%)", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_mem_value_var, 8).pack(
-            side="left", padx=(3, 10))
-        self.xp_mem_scan_btn = HoverButton(
-            row, "1° Scan", self._mem_scan_xp, bg="#1f3b4f",
-            hover="#264a63", font=(FONT, 8), padx=8, pady=3)
-        self.xp_mem_scan_btn.pack(side="left")
-        self.xp_mem_rescan_btn = HoverButton(
-            row, "Re-scan", self._mem_rescan_xp, bg="#1f3b4f",
-            hover="#264a63", font=(FONT, 8), padx=8, pady=3,
-            state="disabled")
-        self.xp_mem_rescan_btn.pack(side="left", padx=6)
-        self.xp_mem_read_btn = HoverButton(
-            row, "Ler agora", self._mem_read_xp, bg="#1f4f3a",
-            hover="#27634a", font=(FONT, 8), padx=8, pady=3,
-            state="disabled")
-        self.xp_mem_read_btn.pack(side="left")
-        tk.Label(body,
-                 text="Digite seu XP% atual no jogo, clique 1° Scan. "
-                      "Ganhe XP, atualize o valor e clique Re-scan. "
-                      "Repita até achar o endereço.",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
-                 justify="left").pack(anchor="w", pady=(6, 0))
-
-        sep = tk.Frame(body, bg=BORDER, height=1)
-        sep.pack(fill="x", pady=(10, 6))
-        tk.Label(body, text="AUTO-DETECT (UE4 SDK DUMP)",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
-        self.xp_sdk_status = tk.Label(
-            body, text="Varre GNames/GObjects do UE4 pra achar offsets.",
-            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w",
-            justify="left", wraplength=600)
-        self.xp_sdk_status.pack(fill="x", pady=(4, 6))
-        sdk_row = tk.Frame(body, bg=SURFACE)
-        sdk_row.pack(fill="x")
-        self.xp_sdk_btn = HoverButton(
-            sdk_row, "Dump SDK", self._sdk_dump, bg="#3a1f4f",
-            hover="#4a2863", font=(FONT, 8), padx=8, pady=3)
-        self.xp_sdk_btn.pack(side="left")
-        self.xp_sdk_props_box = tk.Frame(body, bg=SURFACE)
-        self.xp_sdk_props_box.pack(fill="x", pady=(6, 0))
+        self._refresh_xp_history()
 
     @staticmethod
     def _parse_pct(text):
@@ -1555,19 +1410,6 @@ class App(tk.Tk):
             return float(value)
         except Exception:
             return None
-
-    def _read_xp_value(self):
-        if self._mem_addr and self._mem_handle:
-            val = memory.read_float(self._mem_handle, self._mem_addr)
-            if val is not None:
-                if abs(val) < 1.1:
-                    val = val * 100
-                return val, f"mem:0x{self._mem_addr:X}"
-            ival = memory.read_int32(self._mem_handle, self._mem_addr)
-            if ival is not None and ival > 0:
-                val = ival / 10000.0 if ival > 10000 else ival / 100.0
-                return val, f"mem:0x{self._mem_addr:X}"
-        return None, "sem método de leitura disponível"
 
     def _sniff_toggle(self):
         if self._sniffer and self._sniffer.running:
@@ -1692,266 +1534,6 @@ class App(tk.Tk):
             f"'{spot}': {start_pct:.2f}% → {end_pct:.2f}%  "
             f"(+{delta:.2f}%, {len(hist)} kills)", "success")
 
-    def _mem_ensure_handle(self):
-        inst = self._sel_inst()
-        if not inst:
-            self.toast("Selecione uma conta primeiro.", "warning")
-            return None
-        pid = inst.win.pid
-        if self._mem_pid != pid:
-            if self._mem_handle:
-                memory.close_process(self._mem_handle)
-            self._mem_handle = memory.open_process(pid)
-            self._mem_pid = pid
-            self._mem_candidates = None
-            self._mem_addr = None
-            if not self._mem_handle:
-                self.toast("Não consegui abrir o processo. Rode como admin.",
-                           "error")
-                return None
-        return self._mem_handle
-
-    def _mem_scan_xp(self):
-        handle = self._mem_ensure_handle()
-        if not handle:
-            return
-        val = self._parse_pct(self.xp_mem_value_var.get())
-        if val is None:
-            self.toast("Digite o XP% atual (ex.: 45.23).", "warning")
-            return
-        self.xp_mem_status.configure(text="Escaneando memória (multi-formato)...", fg=ORANGE)
-        self.update_idletasks()
-
-        def run():
-            results = []
-            # float como digitado (ex: 50.79)
-            results += memory.scan_float(handle, val, tolerance=0.01)
-            # float 0-1 (ex: 0.5079)
-            results += memory.scan_float(handle, val / 100.0, tolerance=0.0001)
-            # int ×100 (ex: 5079)
-            results += memory.scan_int(handle, int(round(val * 100)))
-            # int ×10000 (ex: 507900)
-            results += memory.scan_int(handle, int(round(val * 10000)))
-            # deduplica
-            results = list(dict.fromkeys(results))
-            self.after(0, lambda: self._mem_scan_done(results))
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _mem_scan_done(self, results):
-        self._mem_candidates = results
-        n = len(results)
-        if n == 0:
-            self.xp_mem_status.configure(
-                text="Nenhum endereço encontrado. Verifique o valor.", fg=RED)
-            self.xp_mem_rescan_btn.configure(state="disabled")
-            self.xp_mem_read_btn.configure(state="disabled")
-        elif n <= 10:
-            self._mem_addr = results[0]
-            self.xp_mem_status.configure(
-                text=f"{n} endereço(s) encontrado(s). Pronto pra ler!",
-                fg=GREEN)
-            self.xp_mem_rescan_btn.configure(state="normal")
-            self.xp_mem_read_btn.configure(state="normal")
-        else:
-            self.xp_mem_status.configure(
-                text=f"{n} candidatos. Ganhe XP, atualize o valor e Re-scan.",
-                fg=ACCENT)
-            self.xp_mem_rescan_btn.configure(state="normal")
-            self.xp_mem_read_btn.configure(state="disabled")
-
-    def _mem_rescan_xp(self):
-        handle = self._mem_ensure_handle()
-        if not handle or not self._mem_candidates:
-            return
-        val = self._parse_pct(self.xp_mem_value_var.get())
-        if val is None:
-            self.toast("Atualize o XP% atual e clique Re-scan.", "warning")
-            return
-        results = []
-        for target, tol in [(val, 0.01), (val / 100.0, 0.0001)]:
-            results += memory.scan_float(
-                handle, target, tolerance=tol, candidates=self._mem_candidates)
-        for target_i in [int(round(val * 100)), int(round(val * 10000))]:
-            results += memory.scan_int(
-                handle, target_i, candidates=self._mem_candidates)
-        results = list(dict.fromkeys(results))
-        self._mem_scan_done(results)
-
-    def _mem_read_xp(self):
-        handle = self._mem_ensure_handle()
-        if not handle or not self._mem_addr:
-            return
-        # tenta float, int/100, int/10000
-        val = memory.read_float(handle, self._mem_addr)
-        if val is not None:
-            if abs(val) < 1.1:
-                val = val * 100  # era 0-1 range
-        else:
-            ival = memory.read_int32(handle, self._mem_addr)
-            if ival is not None:
-                if ival > 10000:
-                    val = ival / 10000.0
-                elif ival > 0:
-                    val = ival / 100.0
-        if val is None:
-            self.xp_mem_status.configure(
-                text="Falha na leitura. Endereço pode ter mudado.", fg=RED)
-            return
-        field = self.xp_end_var if self._xp_active else self.xp_start_var
-        field.set(f"{val:.2f}")
-        self.xp_mem_status.configure(
-            text=f"Leitura: {val:.2f}%  (addr: 0x{self._mem_addr:X})",
-            fg=GREEN)
-        self.toast(f"XP (memória): {val:.2f}%", "success")
-
-    def _sdk_dump(self):
-        handle = self._mem_ensure_handle()
-        if not handle:
-            return
-        self.xp_sdk_status.configure(text="Escaneando GNames...", fg=ORANGE)
-        self.xp_sdk_btn.configure(state="disabled")
-        self.update_idletasks()
-
-        def run():
-            def progress(phase, pct):
-                self.after(0, lambda p=phase, v=pct:
-                           self.xp_sdk_status.configure(
-                               text=f"{p}: {v}%", fg=ORANGE))
-            result = ue4.full_scan(handle, progress)
-            self.after(0, lambda: self._sdk_dump_done(result))
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _sdk_dump_done(self, result):
-        self.xp_sdk_btn.configure(state="normal")
-        for w in self.xp_sdk_props_box.winfo_children():
-            w.destroy()
-
-        if not result:
-            self.xp_sdk_status.configure(
-                text="Não encontrou GNames/GObjects. O jogo está aberto?",
-                fg=RED)
-            return
-
-        if result.get("error") == "gnames_not_found":
-            probe = result.get("probe_count", 0)
-            if probe > 0:
-                self.xp_sdk_status.configure(
-                    text=f"GNames não encontrado mas 'ByteProperty' existe "
-                         f"({probe}x). Header diferente do padrão.",
-                    fg=ORANGE)
-            else:
-                self.xp_sdk_status.configure(
-                    text="Nomes UE4 não encontrados em plaintext. "
-                         "O jogo pode encriptar FNames.",
-                    fg=RED)
-            return
-
-        player_data = result.get("player_data", {})
-        if not player_data:
-            gn = result["gnames"]
-            go = result["gobjects"]
-            self.xp_sdk_status.configure(
-                text=f"GNames OK ({sum(1 for b in gn['blocks'] if b)} blocos), "
-                     f"GObjects OK ({go['num_elements']} objetos). "
-                     f"Mas nenhuma classe do jogador encontrada.",
-                fg=ORANGE)
-            self._ue4_result = result
-            return
-
-        total_props = sum(len(v) for v in player_data.values())
-        self.xp_sdk_status.configure(
-            text=f"Encontrado! {len(player_data)} classes, "
-                 f"{total_props} propriedades.",
-            fg=GREEN)
-        self._ue4_result = result
-
-        for cls_name, props in player_data.items():
-            tk.Label(self.xp_sdk_props_box, text=cls_name,
-                     bg=SURFACE, fg=ACCENT, font=(FONT, 8, "bold")).pack(
-                anchor="w", pady=(4, 0))
-            for pname, offset in sorted(props.items(), key=lambda x: x[1]):
-                row = tk.Frame(self.xp_sdk_props_box, bg=SURFACE)
-                row.pack(fill="x")
-                tk.Label(row, text=f"  0x{offset:04X}  {pname}",
-                         bg=SURFACE, fg=MUTED, font=(MONO, 8)).pack(
-                    side="left")
-
-    def _xp_start(self):
-        if self._xp_active:
-            self.toast("Já existe uma sessão ativa.", "warning")
-            return
-        spot = self.xp_spot_var.get().strip() or "Spot 1"
-        start = self._parse_pct(self.xp_start_var.get())
-        if start is None:
-            self.toast("Informe o XP inicial (ex.: 12.34).", "warning")
-            return
-        self._xp_active = {
-            "spot": spot,
-            "start_ts": time.time(),
-            "start_pct": start,
-        }
-        self.xp_end_var.set("")
-        self._update_xp_ui()
-        self.toast(f"Sessão iniciada: {spot}.", "success")
-
-    def _xp_stop(self):
-        active = self._xp_active
-        if not active:
-            self.toast("Nenhuma sessão ativa.", "warning")
-            return
-        end = self._parse_pct(self.xp_end_var.get())
-        if end is None:
-            self.toast("Informe o XP final (ex.: 15.67).", "warning")
-            return
-        seconds = time.time() - active["start_ts"]
-        if seconds < 1:
-            self.toast("Espere pelo menos alguns segundos.", "warning")
-            return
-        delta = end - active["start_pct"]
-        if delta < 0:
-            levels = simpledialog.askinteger(
-                "Nível subiu?",
-                "O XP final é menor que o inicial.\nQuantos níveis subiram?",
-                parent=self, initialvalue=1, minvalue=1)
-            if levels is None:
-                return
-            delta += 100.0 * levels
-        if delta <= 0:
-            self.toast("O XP final precisa ser maior que o inicial.", "warning")
-            return
-        session = {
-            "spot": active["spot"],
-            "start_ts": active["start_ts"],
-            "end_ts": time.time(),
-            "start_pct": active["start_pct"],
-            "end_pct": end,
-            "seconds": seconds,
-            "delta": delta,
-            "rate": xp_rate(delta, seconds),
-            "per10": delta * 600.0 / seconds,
-        }
-        self.cfg.xp_sessions.append(session)
-        self.cfg.xp_sessions = self.cfg.xp_sessions[-50:]
-        self.cfg.save()
-        self._xp_active = None
-        self.xp_end_var.set("")
-        self._update_xp_ui()
-        self.toast(
-            f"{session['spot']}: +{delta:.2f}% em "
-            f"{format_duration(seconds)} ({session['rate']:.1f}%/h).",
-            "success")
-
-    def _xp_cancel(self):
-        if not self._xp_active:
-            return
-        if not messagebox.askyesno("Cancelar", "Cancelar a sessão de XP atual?"):
-            return
-        self._xp_active = None
-        self._update_xp_ui()
-        self.toast("Sessão cancelada.", "info")
-
     def _xp_clear(self):
         if not self.cfg.xp_sessions:
             return
@@ -1961,7 +1543,7 @@ class App(tk.Tk):
         self.cfg.xp_sessions = []
         self.cfg.save()
         self._xp_sig = None
-        self._update_xp_ui()
+        self._refresh_xp_history()
         self.toast("Histórico de XP apagado.", "success")
 
     def _xp_remove(self, index):
@@ -1975,32 +1557,12 @@ class App(tk.Tk):
         self.cfg.xp_sessions.pop(index)
         self.cfg.save()
         self._xp_sig = None
-        self._update_xp_ui()
+        self._refresh_xp_history()
 
-    def _update_xp_ui(self):
-        if not hasattr(self, "xp_active_label"):
-            return
-        active = self._xp_active
-        if active:
-            elapsed = time.time() - active["start_ts"]
-            self.xp_active_label.configure(
-                text=f"Sessão ativa: {active['spot']}  ·  "
-                     f"{format_duration(elapsed)}  ·  "
-                     f"início {active['start_pct']:.2f}%",
-                fg=GREEN)
-            self.xp_start_btn.configure(state="disabled")
-            self.xp_stop_btn.configure(state="normal")
-            self.xp_cancel_btn.configure(state="normal")
-        else:
-            self.xp_active_label.configure(text="Nenhuma sessão ativa.",
-                                           fg=MUTED)
-            self.xp_start_btn.configure(state="normal")
-            self.xp_stop_btn.configure(state="disabled")
-            self.xp_cancel_btn.configure(state="disabled")
-
+    def _refresh_xp_history(self):
         sessions = self.cfg.xp_sessions
         sig = tuple((s.get("spot"), s.get("end_ts"), s.get("delta"),
-                     s.get("rate"), s.get("xp_abs_hour")) for s in sessions)
+                     s.get("rate")) for s in sessions)
         if sig == self._xp_sig:
             return
         self._xp_sig = sig
@@ -3051,7 +2613,7 @@ class App(tk.Tk):
             self._panic()
         self._tick_rooms()
         self._update_buttons()
-        self._update_xp_ui()
+        self._refresh_xp_history()
         if self._refresh_job:
             try:
                 self.after_cancel(self._refresh_job)
