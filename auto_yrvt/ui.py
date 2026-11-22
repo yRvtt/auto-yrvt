@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, simpledialog
 import win32api
 import win32gui
 
-from . import memory, sniffer, ue4, updater, vision
+from . import memory, sniffer, ue4, updater
 from .core import (
     APP_NAME, APP_VERSION, CFG_DIR, MACRO_TASKS, MODE_DEFAULT_INTERVAL,
     MODES, ROOMS, Manager, Recorder, VK_F12, client_point, client_size,
@@ -1300,6 +1300,7 @@ class App(tk.Tk):
         self._xp_sig = None
         self._sniffer = None
         self._sniff_timer = None
+        self._sniff_spot_start = None
         self._mem_handle = None
         self._mem_pid = None
         self._mem_candidates = None
@@ -1309,25 +1310,150 @@ class App(tk.Tk):
         self.xp_spot_var = tk.StringVar(value="Spot 1")
         self.xp_start_var = tk.StringVar()
         self.xp_end_var = tk.StringVar()
-        self.xp_ocr_auto = tk.BooleanVar(value=vision.ocr_available())
-        self.xp_region_w_var = tk.StringVar(value="180")
-        self.xp_region_h_var = tk.StringVar(value="34")
 
-        tk.Label(body, text="LABORATÓRIO DE XP", bg=BG, fg=MUTED,
-                 font=(FONT, 8, "bold")).pack(anchor="w")
-        tk.Label(body,
-                 text="Inicie a sessão, deixe o macro rodando no spot e informe "
-                      "o XP no começo e no fim. O tempo é medido automaticamente.",
-                 bg=BG, fg=MUTED, font=(FONT, 8), justify="left",
-                 wraplength=680).pack(anchor="w", pady=(2, 8))
 
+        # ── CARD 1: SNIFFER (principal) ──
         card, inner = self._card(body)
         card.pack(fill="x", pady=4)
+        head = tk.Frame(inner, bg=SURFACE)
+        head.pack(fill="x")
+        tk.Label(head, text="SNIFFER DE XP", bg=SURFACE, fg=ACCENT,
+                 font=(FONT, 10, "bold")).pack(side="left")
+        self.xp_sniff_indicator = tk.Label(
+            head, text="", bg=SURFACE, fg=MUTED, font=(FONT, 8))
+        self.xp_sniff_indicator.pack(side="right")
+
+        tk.Label(inner,
+                 text="Captura pacotes do MIR4 em tempo real. "
+                      "Informe o nome do spot, inicie e deixe o macro rodando.",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8), justify="left",
+                 wraplength=680).pack(anchor="w", pady=(4, 8))
+
         row = tk.Frame(inner, bg=SURFACE)
         row.pack(fill="x")
         tk.Label(row, text="Spot", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_spot_var, 20).pack(side="left", padx=(4, 14))
+                 font=(FONT, 9)).pack(side="left")
+        self._entry(row, self.xp_spot_var, 24).pack(side="left", padx=(6, 14))
+        self.xp_sniff_btn = HoverButton(
+            row, "Iniciar Sniffer", self._sniff_toggle, bg=ACCENT,
+            hover=ACCENT2, fg=BG, font=(FONT, 9, "bold"), padx=14, pady=5)
+        self.xp_sniff_btn.pack(side="left")
+        self.xp_sniff_save_btn = HoverButton(
+            row, "Salvar sessao", self._sniff_save, bg="#1f4f3a",
+            hover="#27634a", font=(FONT, 9), padx=10, pady=5,
+            state="disabled")
+        self.xp_sniff_save_btn.pack(side="left", padx=6)
+
+        self.xp_sniff_status = tk.Label(
+            inner, text="Parado. Clique Iniciar para capturar.",
+            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w")
+        self.xp_sniff_status.pack(fill="x", pady=(8, 0))
+
+        # Live stats grid
+        stats_frame = tk.Frame(inner, bg=SURFACE2, padx=10, pady=8)
+        stats_frame.pack(fill="x", pady=(8, 0))
+        self._sniff_labels = {}
+        for i, (key, label) in enumerate([
+            ("xp_kill", "XP / Kill"),
+            ("kills_min", "Kills / Min"),
+            ("xp_hour", "XP / Hora"),
+            ("power", "Power"),
+            ("hp", "HP"),
+            ("elapsed", "Tempo"),
+        ]):
+            col = i % 3
+            rw = i // 3
+            cell = tk.Frame(stats_frame, bg=SURFACE2)
+            cell.grid(row=rw, column=col, sticky="w", padx=(0, 30), pady=2)
+            tk.Label(cell, text=label, bg=SURFACE2, fg=MUTED,
+                     font=(FONT, 7, "bold")).pack(anchor="w")
+            lbl = tk.Label(cell, text="—", bg=SURFACE2, fg=FG,
+                           font=(MONO, 11, "bold"), anchor="w")
+            lbl.pack(anchor="w")
+            self._sniff_labels[key] = lbl
+
+        # ── CARD 2: COMPARAÇÃO ──
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        head = tk.Frame(inner, bg=SURFACE)
+        head.pack(fill="x")
+        tk.Label(head, text="COMPARAÇÃO DE SPOTS", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(side="left")
+        self.xp_best_label = tk.Label(head, text="", bg=SURFACE, fg=ACCENT,
+                                      font=(FONT, 8))
+        self.xp_best_label.pack(side="right")
+        self.xp_chart = tk.Canvas(inner, height=200, bg=SURFACE2,
+                                  highlightthickness=0, bd=0)
+        self.xp_chart.pack(fill="x", pady=(10, 0))
+        self.xp_chart.bind("<Configure>", lambda _e: self._draw_xp_chart())
+
+        # ── CARD 3: HISTÓRICO ──
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        head = tk.Frame(inner, bg=SURFACE)
+        head.pack(fill="x")
+        tk.Label(head, text="HISTÓRICO", bg=SURFACE, fg=MUTED,
+                 font=(FONT, 8, "bold")).pack(side="left")
+        HoverButton(head, "Limpar", self._xp_clear, bg=SURFACE,
+                    hover=SURFACE2, fg=MUTED, font=(FONT, 8),
+                    padx=6, pady=1).pack(side="right")
+        self.xp_sessions_box = tk.Frame(inner, bg=SURFACE)
+        self.xp_sessions_box.pack(fill="x", pady=(6, 0))
+
+        # ── CARD 4: SESSÃO MANUAL (colapsável) ──
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        self._manual_xp_inner = inner
+        self._manual_xp_visible = False
+        self._manual_xp_toggle_btn = HoverButton(
+            inner, "Sessão manual (digitado)  ▸",
+            self._toggle_manual_xp, bg=SURFACE, hover=SURFACE2,
+            fg=MUTED, font=(FONT, 8), padx=0, pady=2, bd=0,
+            relief="flat")
+        self._manual_xp_toggle_btn.pack(anchor="w")
+        self._manual_xp_body = tk.Frame(inner, bg=SURFACE)
+
+        self._build_manual_xp(self._manual_xp_body)
+
+        # ── CARD 5: MEMÓRIA / SDK (colapsável) ──
+        card, inner = self._card(body)
+        card.pack(fill="x", pady=4)
+        self._adv_xp_visible = False
+        self._adv_xp_toggle_btn = HoverButton(
+            inner, "Métodos avançados (memória / SDK)  ▸",
+            self._toggle_adv_xp, bg=SURFACE, hover=SURFACE2,
+            fg=MUTED, font=(FONT, 8), padx=0, pady=2, bd=0,
+            relief="flat")
+        self._adv_xp_toggle_btn.pack(anchor="w")
+        self._adv_xp_body = tk.Frame(inner, bg=SURFACE)
+
+        self._build_adv_xp(self._adv_xp_body)
+
+        self._update_xp_ui()
+
+    def _toggle_manual_xp(self):
+        self._manual_xp_visible = not self._manual_xp_visible
+        arrow = "▾" if self._manual_xp_visible else "▸"
+        self._manual_xp_toggle_btn.configure(
+            text=f"Sessão manual (digitado)  {arrow}")
+        if self._manual_xp_visible:
+            self._manual_xp_body.pack(fill="x", pady=(6, 0))
+        else:
+            self._manual_xp_body.pack_forget()
+
+    def _toggle_adv_xp(self):
+        self._adv_xp_visible = not self._adv_xp_visible
+        arrow = "▾" if self._adv_xp_visible else "▸"
+        self._adv_xp_toggle_btn.configure(
+            text=f"Métodos avançados (memória / SDK)  {arrow}")
+        if self._adv_xp_visible:
+            self._adv_xp_body.pack(fill="x", pady=(6, 0))
+        else:
+            self._adv_xp_body.pack_forget()
+
+    def _build_manual_xp(self, body):
+        row = tk.Frame(body, bg=SURFACE)
+        row.pack(fill="x", pady=(4, 0))
         tk.Label(row, text="XP inicial (%)", bg=SURFACE, fg=MUTED,
                  font=(FONT, 8)).pack(side="left")
         self._entry(row, self.xp_start_var, 8).pack(side="left", padx=(4, 14))
@@ -1335,8 +1461,8 @@ class App(tk.Tk):
                  font=(FONT, 8)).pack(side="left")
         self._entry(row, self.xp_end_var, 8).pack(side="left", padx=(4, 14))
 
-        actions = tk.Frame(inner, bg=SURFACE)
-        actions.pack(fill="x", pady=(10, 0))
+        actions = tk.Frame(body, bg=SURFACE)
+        actions.pack(fill="x", pady=(8, 0))
         self.xp_start_btn = HoverButton(
             actions, "Iniciar sessão", self._xp_start, bg=ACCENT,
             hover=ACCENT2, fg=BG, font=(FONT, 9, "bold"), padx=12, pady=5)
@@ -1352,85 +1478,24 @@ class App(tk.Tk):
             state="disabled")
         self.xp_cancel_btn.pack(side="left")
         self.xp_active_label = tk.Label(
-            inner, text="Nenhuma sessão ativa.", bg=SURFACE, fg=MUTED,
+            body, text="Nenhuma sessão ativa.", bg=SURFACE, fg=MUTED,
             font=(FONT, 9), anchor="w")
-        self.xp_active_label.pack(fill="x", pady=(10, 0))
-        tk.Label(inner,
-                 text="Ao finalizar com XP menor, o app pergunta quantos níveis "
-                      "subiram e soma 100% por nível.",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 7),
-                 justify="left").pack(anchor="w", pady=(4, 0))
+        self.xp_active_label.pack(fill="x", pady=(8, 0))
 
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        tk.Label(inner, text="LEITURA AUTOMÁTICA (OCR DO WINDOWS)",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
-        self.xp_ocr_status = tk.Label(
-            inner, text="", bg=SURFACE, fg=MUTED, font=(FONT, 8),
-            anchor="w", justify="left")
-        self.xp_ocr_status.pack(fill="x", pady=(4, 6))
-        row = tk.Frame(inner, bg=SURFACE)
-        row.pack(fill="x")
-        tk.Label(row, text="Largura", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_region_w_var, 5).pack(side="left", padx=(3, 10))
-        tk.Label(row, text="Altura", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8)).pack(side="left")
-        self._entry(row, self.xp_region_h_var, 5).pack(side="left", padx=(3, 10))
-        self.xp_ocr_cal_btn = HoverButton(
-            row, "Calibrar região", self._calibrate_xp, bg=SURFACE2,
-            hover=SURFACE3, font=(FONT, 8), padx=8, pady=3)
-        self.xp_ocr_cal_btn.pack(side="left")
-        self.xp_ocr_read_btn = HoverButton(
-            row, "Ler agora", self._read_xp_now, bg="#1f3b4f",
-            hover="#264a63", font=(FONT, 8), padx=8, pady=3)
-        self.xp_ocr_read_btn.pack(side="left", padx=6)
-        trow = tk.Frame(inner, bg=SURFACE)
-        trow.pack(fill="x", pady=(8, 0))
-        ToggleSwitch(trow, self.xp_ocr_auto, bg=SURFACE).pack(side="left")
-        tk.Label(trow, text="Ler automaticamente ao iniciar e finalizar",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8)).pack(side="left",
-                                                            padx=(6, 0))
-        tk.Label(inner,
-                 text="Capture o canto superior esquerdo do número de XP. "
-                      "Deixe o jogo visível; se o OCR falhar, use os campos "
-                      "manuais.",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 7), justify="left").pack(
-            anchor="w", pady=(6, 0))
-
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        tk.Label(inner, text="LEITURA POR PACOTES (SNIFFER)",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
-        self.xp_sniff_status = tk.Label(
-            inner, text="Parado. Requer admin.",
-            bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w", justify="left")
-        self.xp_sniff_status.pack(fill="x", pady=(4, 6))
-        sniff_row = tk.Frame(inner, bg=SURFACE)
-        sniff_row.pack(fill="x")
-        self.xp_sniff_btn = HoverButton(
-            sniff_row, "Iniciar Sniffer", self._sniff_toggle, bg="#1f4f3a",
-            hover="#27634a", font=(FONT, 8), padx=8, pady=3)
-        self.xp_sniff_btn.pack(side="left")
-        self.xp_sniff_live = tk.Label(
-            inner, text="", bg=SURFACE, fg=GREEN, font=(MONO, 9),
-            anchor="w", justify="left")
-        self.xp_sniff_live.pack(fill="x", pady=(6, 0))
-        tk.Label(inner,
-                 text="Captura pacotes TCP do MIR4 (porta 33000). "
-                      "Lê XP por kill, Power e HP/MP em tempo real.",
+        tk.Label(body,
+                 text="Informe manualmente a % de XP no início e no fim.",
                  bg=SURFACE, fg=MUTED, font=(FONT, 7),
                  justify="left").pack(anchor="w", pady=(6, 0))
 
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        tk.Label(inner, text="LEITURA POR MEMÓRIA",
-                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
+    def _build_adv_xp(self, body):
+        tk.Label(body, text="LEITURA POR MEMÓRIA",
+                 bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(
+            anchor="w", pady=(4, 0))
         self.xp_mem_status = tk.Label(
-            inner, text="Nenhum endereço encontrado.",
+            body, text="Nenhum endereço encontrado.",
             bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w", justify="left")
         self.xp_mem_status.pack(fill="x", pady=(4, 6))
-        row = tk.Frame(inner, bg=SURFACE)
+        row = tk.Frame(body, bg=SURFACE)
         row.pack(fill="x")
         tk.Label(row, text="XP atual (%)", bg=SURFACE, fg=MUTED,
                  font=(FONT, 8)).pack(side="left")
@@ -1450,58 +1515,30 @@ class App(tk.Tk):
             hover="#27634a", font=(FONT, 8), padx=8, pady=3,
             state="disabled")
         self.xp_mem_read_btn.pack(side="left")
-        tk.Label(inner,
+        tk.Label(body,
                  text="Digite seu XP% atual no jogo, clique 1° Scan. "
                       "Ganhe XP, atualize o valor e clique Re-scan. "
                       "Repita até achar o endereço.",
                  bg=SURFACE, fg=MUTED, font=(FONT, 7),
                  justify="left").pack(anchor="w", pady=(6, 0))
 
-        sep = tk.Frame(inner, bg=BORDER, height=1)
+        sep = tk.Frame(body, bg=BORDER, height=1)
         sep.pack(fill="x", pady=(10, 6))
-        tk.Label(inner, text="AUTO-DETECT (UE4 SDK DUMP)",
+        tk.Label(body, text="AUTO-DETECT (UE4 SDK DUMP)",
                  bg=SURFACE, fg=MUTED, font=(FONT, 8, "bold")).pack(anchor="w")
         self.xp_sdk_status = tk.Label(
-            inner, text="Varre GNames/GObjects do UE4 pra achar offsets.",
+            body, text="Varre GNames/GObjects do UE4 pra achar offsets.",
             bg=SURFACE, fg=MUTED, font=(FONT, 8), anchor="w",
             justify="left", wraplength=600)
         self.xp_sdk_status.pack(fill="x", pady=(4, 6))
-        sdk_row = tk.Frame(inner, bg=SURFACE)
+        sdk_row = tk.Frame(body, bg=SURFACE)
         sdk_row.pack(fill="x")
         self.xp_sdk_btn = HoverButton(
             sdk_row, "Dump SDK", self._sdk_dump, bg="#3a1f4f",
             hover="#4a2863", font=(FONT, 8), padx=8, pady=3)
         self.xp_sdk_btn.pack(side="left")
-        self.xp_sdk_props_box = tk.Frame(inner, bg=SURFACE)
+        self.xp_sdk_props_box = tk.Frame(body, bg=SURFACE)
         self.xp_sdk_props_box.pack(fill="x", pady=(6, 0))
-
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        head = tk.Frame(inner, bg=SURFACE)
-        head.pack(fill="x")
-        tk.Label(head, text="COMPARAÇÃO", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8, "bold")).pack(side="left")
-        self.xp_best_label = tk.Label(head, text="", bg=SURFACE, fg=ACCENT,
-                                      font=(FONT, 8))
-        self.xp_best_label.pack(side="right")
-        self.xp_chart = tk.Canvas(inner, height=180, bg=SURFACE2,
-                                  highlightthickness=0, bd=0)
-        self.xp_chart.pack(fill="x", pady=(10, 0))
-        self.xp_chart.bind("<Configure>", lambda _e: self._draw_xp_chart())
-
-        card, inner = self._card(body)
-        card.pack(fill="x", pady=4)
-        head = tk.Frame(inner, bg=SURFACE)
-        head.pack(fill="x")
-        tk.Label(head, text="HISTÓRICO", bg=SURFACE, fg=MUTED,
-                 font=(FONT, 8, "bold")).pack(side="left")
-        HoverButton(head, "Limpar", self._xp_clear, bg=SURFACE,
-                    hover=SURFACE2, fg=MUTED, font=(FONT, 8),
-                    padx=6, pady=1).pack(side="right")
-        self.xp_sessions_box = tk.Frame(inner, bg=SURFACE)
-        self.xp_sessions_box.pack(fill="x", pady=(6, 0))
-
-        self._update_xp_ui()
 
     @staticmethod
     def _parse_pct(text):
@@ -1510,12 +1547,6 @@ class App(tk.Tk):
             return float(value)
         except Exception:
             return None
-
-    def _xp_region(self):
-        inst = self._sel_inst()
-        if not inst:
-            return None, None
-        return inst, inst.xp_region_px()
 
     def _read_xp_value(self):
         if self._mem_addr and self._mem_handle:
@@ -1528,59 +1559,7 @@ class App(tk.Tk):
             if ival is not None and ival > 0:
                 val = ival / 10000.0 if ival > 10000 else ival / 100.0
                 return val, f"mem:0x{self._mem_addr:X}"
-        inst, region = self._xp_region()
-        if not inst:
-            return None, "selecione uma conta"
-        if not region:
-            return None, "região não calibrada"
-        return vision.read_percent(inst.hwnd, region)
-
-    def _calibrate_xp(self):
-        inst, _ = self._xp_region()
-        if not inst:
-            self.toast("Selecione uma conta primeiro.", "warning")
-            return
-        self.toast("Ponha o mouse no canto superior esquerdo do XP; 3s.", "info")
-        self.after(3000, self._do_calibrate_xp)
-
-    def _do_calibrate_xp(self):
-        inst, _ = self._xp_region()
-        if not inst:
-            return
-        x, y = win32api.GetCursorPos()
-        cx, cy = win32gui.ScreenToClient(inst.hwnd, (x, y))
-        width = self._int(self.xp_region_w_var, 180, 20)
-        height = self._int(self.xp_region_h_var, 34, 12)
-        if inst.set_xp_region(cx, cy, width, height):
-            self.toast("Região de XP calibrada. Teste com Ler agora.",
-                       "success")
-            self._update_xp_ui()
-        else:
-            self.toast("Não consegui calibrar a região.", "error")
-
-    def _read_xp_now(self):
-        inst, _ = self._xp_region()
-        if not inst:
-            self.toast("Selecione uma conta primeiro.", "warning")
-            return
-        if not vision.ocr_available():
-            self.toast("OCR indisponível: instale winocr e Pillow.", "warning")
-            return
-        self.toast("Leitura em 3s; deixe o XP visível.", "info")
-        self.after(3000, self._do_read_xp_now)
-
-    def _do_read_xp_now(self):
-        value, text = self._read_xp_value()
-        if value is None:
-            self.xp_ocr_status.configure(
-                text=f"OCR não leu: {text}", fg=ORANGE)
-            self.toast(f"OCR não leu: {text}", "warning")
-            return
-        field = self.xp_end_var if self._xp_active else self.xp_start_var
-        field.set(f"{value:.2f}")
-        self.xp_ocr_status.configure(
-            text=f"Leitura: {value:.2f}%  (OCR: {text!r})", fg=GREEN)
-        self.toast(f"XP lido: {value:.2f}%", "success")
+        return None, "sem método de leitura disponível"
 
     def _sniff_toggle(self):
         if self._sniffer and self._sniffer.running:
@@ -1589,13 +1568,19 @@ class App(tk.Tk):
             if self._sniff_timer:
                 self.after_cancel(self._sniff_timer)
                 self._sniff_timer = None
-            self.xp_sniff_btn.configure(text="Iniciar Sniffer", bg="#1f4f3a")
-            self.xp_sniff_status.configure(text="Parado.", fg=MUTED)
-            self.xp_sniff_live.configure(text="")
+            self.xp_sniff_btn.configure(text="Iniciar Sniffer", bg=ACCENT)
+            self.xp_sniff_status.configure(
+                text="Parado. Clique Iniciar para capturar.", fg=MUTED)
+            self.xp_sniff_indicator.configure(text="")
+            self.xp_sniff_save_btn.configure(state="normal")
+            for lbl in self._sniff_labels.values():
+                lbl.configure(text="—")
             self.toast("Sniffer parado.", "info")
             return
         self._sniffer = sniffer.Sniffer()
         self._sniffer.start()
+        self._sniff_spot_start = time.time()
+        self.xp_sniff_save_btn.configure(state="disabled")
         self.after(500, self._sniff_check_started)
 
     def _sniff_check_started(self):
@@ -1604,6 +1589,7 @@ class App(tk.Tk):
         if self._sniffer.running:
             self.xp_sniff_btn.configure(text="Parar Sniffer", bg="#3a2024")
             self.xp_sniff_status.configure(text="Capturando...", fg=GREEN)
+            self.xp_sniff_indicator.configure(text="● AO VIVO", fg=GREEN)
             self.toast("Sniffer iniciado.", "success")
             self._sniff_update()
         else:
@@ -1615,26 +1601,77 @@ class App(tk.Tk):
         if not self._sniffer or not self._sniffer.running:
             return
         snap = self._sniffer.data.snapshot()
-        stats = self._sniffer.stats
         rate = self._sniffer.data.xp_rate_per_hour()
-        lines = []
+        elapsed = time.time() - (self._sniff_spot_start or time.time())
+        hist = self._sniffer.data.xp_history
+        kills_min = 0.0
+        if len(hist) >= 2:
+            dt = hist[-1][0] - hist[0][0]
+            if dt > 5:
+                kills_min = len(hist) / (dt / 60)
+
+        sl = self._sniff_labels
         if snap['xp_total'] > 0:
-            lines.append(
-                f"XP/kill: {snap['xp_base']:,} + {snap['xp_bonus']:,} "
-                f"= {snap['xp_total']:,}")
+            sl["xp_kill"].configure(
+                text=f"{snap['xp_total']:,}", fg=ACCENT)
+        if kills_min > 0:
+            sl["kills_min"].configure(text=f"{kills_min:.1f}", fg=FG)
         if rate > 0:
-            lines.append(f"XP/h (abs): ~{rate:,.0f}")
+            sl["xp_hour"].configure(text=f"{rate:,.0f}", fg=ACCENT)
         if snap['power'] > 0:
-            lines.append(f"Power: {snap['power']:,}")
+            sl["power"].configure(text=f"{snap['power']:,}", fg=FG)
         if snap['hp_max'] > 0:
-            lines.append(
-                f"HP: {snap['hp']:,}/{snap['hp_max']:,}  "
-                f"MP max: {snap['mp_max']:,}")
-        lines.append(
-            f"Pacotes: {stats['packets']:,}  |  "
-            f"Eventos XP: {snap['xp_count']}")
-        self.xp_sniff_live.configure(text="\n".join(lines))
+            sl["hp"].configure(
+                text=f"{snap['hp']:,}/{snap['hp_max']:,}", fg=FG)
+
+        mins = int(elapsed) // 60
+        secs = int(elapsed) % 60
+        sl["elapsed"].configure(text=f"{mins:02d}:{secs:02d}", fg=FG)
+
+        self.xp_sniff_status.configure(
+            text=f"Eventos XP: {snap['xp_count']}  |  "
+                 f"Pacotes: {self._sniffer.stats['packets']:,}",
+            fg=GREEN)
+
         self._sniff_timer = self.after(2000, self._sniff_update)
+
+    def _sniff_save(self):
+        if not self._sniffer:
+            self.toast("Nenhuma captura ativa.", "warning")
+            return
+        hist = self._sniffer.data.xp_history
+        if len(hist) < 2:
+            self.toast("Precisa de pelo menos 2 kills para salvar.", "warning")
+            return
+        snap = self._sniffer.data.snapshot()
+        dt = hist[-1][0] - hist[0][0]
+        if dt < 5:
+            self.toast("Tempo muito curto.", "warning")
+            return
+        kills_min = len(hist) / (dt / 60)
+        xp_per_kill = snap['xp_total']
+        xp_abs_hour = self._sniffer.data.xp_rate_per_hour()
+        spot = self.xp_spot_var.get().strip() or "Spot"
+        total_secs = int(time.time() - (self._sniff_spot_start or time.time()))
+
+        session = {
+            "spot": spot,
+            "start_ts": self._sniff_spot_start,
+            "end_ts": time.time(),
+            "seconds": total_secs,
+            "xp_per_kill": xp_per_kill,
+            "kills_min": round(kills_min, 1),
+            "xp_abs_hour": int(xp_abs_hour),
+            "kills": len(hist),
+            "power": snap['power'],
+            "source": "sniffer",
+        }
+        self.cfg.xp_sessions.append(session)
+        self.cfg.save()
+        self._rebuild_xp_sessions()
+        self._draw_xp_chart()
+        self.xp_sniff_save_btn.configure(state="disabled")
+        self.toast(f"Sessão '{spot}' salva ({len(hist)} kills).", "success")
 
     def _mem_ensure_handle(self):
         inst = self._sel_inst()
@@ -1828,17 +1865,6 @@ class App(tk.Tk):
             return
         spot = self.xp_spot_var.get().strip() or "Spot 1"
         start = self._parse_pct(self.xp_start_var.get())
-        if self.xp_ocr_auto.get():
-            value, text = self._read_xp_value()
-            if value is not None:
-                start = value
-                self.xp_start_var.set(f"{value:.2f}")
-                self.xp_ocr_status.configure(
-                    text=f"Leitura inicial: {value:.2f}%", fg=GREEN)
-            elif start is None:
-                self.toast(f"OCR não leu ({text}). Informe o XP inicial.",
-                           "warning")
-                return
         if start is None:
             self.toast("Informe o XP inicial (ex.: 12.34).", "warning")
             return
@@ -1857,17 +1883,6 @@ class App(tk.Tk):
             self.toast("Nenhuma sessão ativa.", "warning")
             return
         end = self._parse_pct(self.xp_end_var.get())
-        if self.xp_ocr_auto.get():
-            value, text = self._read_xp_value()
-            if value is not None:
-                end = value
-                self.xp_end_var.set(f"{value:.2f}")
-                self.xp_ocr_status.configure(
-                    text=f"Leitura final: {value:.2f}%", fg=GREEN)
-            elif end is None:
-                self.toast(f"OCR não leu ({text}). Informe o XP final.",
-                           "warning")
-                return
         if end is None:
             self.toast("Informe o XP final (ex.: 15.67).", "warning")
             return
@@ -1964,35 +1979,9 @@ class App(tk.Tk):
             self.xp_stop_btn.configure(state="disabled")
             self.xp_cancel_btn.configure(state="disabled")
 
-        inst = self._sel_inst()
-        if not vision.ocr_available():
-            self.xp_ocr_status.configure(
-                text="OCR indisponível: instale winocr e Pillow.", fg=ORANGE)
-            self.xp_ocr_cal_btn.configure(state="disabled")
-            self.xp_ocr_read_btn.configure(state="disabled")
-        elif not inst:
-            self.xp_ocr_status.configure(
-                text="Selecione uma conta para calibrar a região.", fg=MUTED)
-            self.xp_ocr_cal_btn.configure(state="disabled")
-            self.xp_ocr_read_btn.configure(state="disabled")
-        else:
-            region = inst.xp_region_px()
-            self.xp_ocr_cal_btn.configure(state="normal")
-            if region:
-                self.xp_ocr_status.configure(
-                    text=f"Região pronta: {region[2]}x{region[3]} em "
-                         f"({region[0]}, {region[1]}). Teste com Ler agora.",
-                    fg=GREEN)
-                self.xp_ocr_read_btn.configure(state="normal")
-            else:
-                self.xp_ocr_status.configure(
-                    text="Região não calibrada. Clique em Calibrar região.",
-                    fg=MUTED)
-                self.xp_ocr_read_btn.configure(state="disabled")
-
         sessions = self.cfg.xp_sessions
         sig = tuple((s.get("spot"), s.get("end_ts"), s.get("delta"),
-                     s.get("rate")) for s in sessions)
+                     s.get("rate"), s.get("xp_abs_hour")) for s in sessions)
         if sig == self._xp_sig:
             return
         self._xp_sig = sig
@@ -2005,19 +1994,31 @@ class App(tk.Tk):
         sessions = self.cfg.xp_sessions
         if not sessions:
             tk.Label(self.xp_sessions_box,
-                     text="Nenhuma medição ainda. Inicie uma sessão e rode o macro.",
+                     text="Nenhuma medição ainda. Inicie o sniffer e rode o macro.",
                      bg=SURFACE, fg=MUTED, font=(FONT, 8)).pack(anchor="w",
                                                                 pady=6)
             self.xp_best_label.configure(text="")
             return
-        best = max(s.get("rate", 0) for s in sessions)
-        best_session = max(sessions, key=lambda s: s.get("rate", 0))
-        self.xp_best_label.configure(
-            text=f"Melhor: {best_session.get('spot', '?')}  ·  {best:.1f}%/h")
+
+        def _sort_key(s):
+            if s.get("source") == "sniffer":
+                return s.get("xp_abs_hour", 0)
+            return s.get("rate", 0) * 1e9
+
+        best_session = max(sessions, key=_sort_key)
+        if best_session.get("source") == "sniffer":
+            self.xp_best_label.configure(
+                text=f"Melhor: {best_session.get('spot', '?')}  ·  "
+                     f"{best_session.get('xp_abs_hour', 0):,} XP/h")
+        else:
+            self.xp_best_label.configure(
+                text=f"Melhor: {best_session.get('spot', '?')}  ·  "
+                     f"{best_session.get('rate', 0):.1f}%/h")
+
         header = tk.Frame(self.xp_sessions_box, bg=SURFACE)
         header.pack(fill="x", pady=(0, 2))
-        for text, width in (("SPOT", 24), ("DURAÇÃO", 9), ("+XP", 8),
-                            ("%/H", 8), ("10 MIN", 8)):
+        for text, width in (("SPOT", 18), ("DURAÇÃO", 8), ("XP/KILL", 10),
+                            ("KILLS/M", 8), ("XP/H", 12), ("FONTE", 7)):
             tk.Label(header, text=text, bg=SURFACE, fg=MUTED,
                      font=(FONT, 7, "bold"), width=width, anchor="w").pack(
                 side="left")
@@ -2025,23 +2026,43 @@ class App(tk.Tk):
             real_index = len(sessions) - 1 - index
             row = tk.Frame(self.xp_sessions_box, bg=SURFACE)
             row.pack(fill="x", pady=2)
-            tk.Label(row, text=str(session.get("spot", "?")), bg=SURFACE,
-                     fg=FG, font=(FONT, 9, "bold"), width=24,
+            tk.Label(row, text=str(session.get("spot", "?"))[:18], bg=SURFACE,
+                     fg=FG, font=(FONT, 9, "bold"), width=18,
                      anchor="w").pack(side="left")
             tk.Label(row, text=format_duration(session.get("seconds", 0)),
-                     bg=SURFACE, fg=MUTED, font=(FONT, 8), width=9,
-                     anchor="w").pack(side="left")
-            tk.Label(row, text=f"+{session.get('delta', 0):.2f}%",
-                     bg=SURFACE, fg=GREEN, font=(FONT, 8), width=8,
-                     anchor="w").pack(side="left")
-            rate = session.get("rate", 0)
-            tk.Label(row, text=f"{rate:.1f}", bg=SURFACE,
-                     fg=ACCENT if rate == best else FG,
-                     font=(FONT, 8, "bold"), width=8,
-                     anchor="w").pack(side="left")
-            tk.Label(row, text=f"{session.get('per10', 0):.2f}%",
                      bg=SURFACE, fg=MUTED, font=(FONT, 8), width=8,
                      anchor="w").pack(side="left")
+            if session.get("source") == "sniffer":
+                xpk = session.get("xp_per_kill", 0)
+                km = session.get("kills_min", 0)
+                xph = session.get("xp_abs_hour", 0)
+                tk.Label(row, text=f"{xpk:,}", bg=SURFACE, fg=GREEN,
+                         font=(FONT, 8), width=10, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text=f"{km:.1f}", bg=SURFACE, fg=FG,
+                         font=(FONT, 8), width=8, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text=f"{xph:,}", bg=SURFACE, fg=ACCENT,
+                         font=(FONT, 8, "bold"), width=12, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text="sniff", bg=SURFACE, fg=MUTED,
+                         font=(FONT, 7), width=7, anchor="w").pack(
+                    side="left")
+            else:
+                delta = session.get("delta", 0)
+                rate = session.get("rate", 0)
+                tk.Label(row, text=f"+{delta:.2f}%", bg=SURFACE, fg=GREEN,
+                         font=(FONT, 8), width=10, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text="—", bg=SURFACE, fg=MUTED,
+                         font=(FONT, 8), width=8, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text=f"{rate:.1f}%/h", bg=SURFACE, fg=FG,
+                         font=(FONT, 8), width=12, anchor="w").pack(
+                    side="left")
+                tk.Label(row, text="manual", bg=SURFACE, fg=MUTED,
+                         font=(FONT, 7), width=7, anchor="w").pack(
+                    side="left")
             HoverButton(row, "×", lambda i=real_index: self._xp_remove(i),
                         bg=SURFACE, hover="#3a2024", fg=RED,
                         font=(FONT, 9), padx=4, pady=1).pack(side="right")
@@ -2051,32 +2072,60 @@ class App(tk.Tk):
         if canvas is None:
             return
         canvas.delete("all")
-        sessions = sorted(self.cfg.xp_sessions,
-                          key=lambda s: s.get("rate", 0), reverse=True)[:6]
+        sessions = self.cfg.xp_sessions
         if not sessions:
             canvas.create_text(12, 20, anchor="w", fill=MUTED,
                                font=(FONT, 8),
-                               text="Sem dados: finalize uma sessão para comparar.")
+                               text="Sem dados: inicie o sniffer e rode o macro.")
             return
+
+        def _chart_val(s):
+            if s.get("source") == "sniffer":
+                return s.get("xp_abs_hour", 0)
+            return s.get("rate", 0) * 1e9
+
+        sorted_s = sorted(sessions, key=_chart_val, reverse=True)[:8]
+        has_sniffer = any(s.get("source") == "sniffer" for s in sorted_s)
+
         width = max(200, canvas.winfo_width())
         height = max(120, canvas.winfo_height())
-        best = max(s.get("rate", 0) for s in sessions) or 1
-        row_h = min(24, max(16, (height - 18) // max(1, len(sessions))))
-        label_w = min(150, int(width * 0.28))
+        row_h = min(24, max(16, (height - 18) // max(1, len(sorted_s))))
+        label_w = min(150, int(width * 0.25))
         bar_x = label_w + 8
-        bar_max = max(30, width - bar_x - 72)
-        for i, session in enumerate(sessions):
+        bar_max = max(30, width - bar_x - 100)
+
+        if has_sniffer:
+            best_val = max(s.get("xp_abs_hour", 0)
+                          for s in sorted_s
+                          if s.get("source") == "sniffer") or 1
+        else:
+            best_val = max(s.get("rate", 0) for s in sorted_s) or 1
+
+        for i, session in enumerate(sorted_s):
             y = 8 + i * row_h
-            spot = str(session.get("spot", "?"))[:20]
-            rate = session.get("rate", 0)
+            spot = str(session.get("spot", "?"))[:18]
             canvas.create_text(4, y + row_h / 2 - 2, anchor="w",
                                text=spot, fill=FG, font=(FONT, 8))
-            bar_w = int(bar_max * min(1.0, rate / best))
+
+            if session.get("source") == "sniffer":
+                val = session.get("xp_abs_hour", 0)
+                bar_w = int(bar_max * min(1.0, val / best_val)) if best_val else 0
+                label = f"{val:,} XP/h"
+                if session.get("kills_min"):
+                    label += f"  ({session['kills_min']:.0f}k/m)"
+            else:
+                val = session.get("rate", 0)
+                if has_sniffer:
+                    bar_w = int(bar_max * 0.1)
+                else:
+                    bar_w = int(bar_max * min(1.0, val / best_val))
+                label = f"{val:.1f}%/h"
+
             color = ACCENT if i == 0 else SURFACE3
             canvas.create_rectangle(bar_x, y + 3, bar_x + max(2, bar_w),
                                     y + row_h - 3, fill=color, outline="")
             canvas.create_text(bar_x + bar_w + 6, y + row_h / 2 - 2,
-                               anchor="w", text=f"{rate:.1f}%/h",
+                               anchor="w", text=label,
                                fill=ACCENT if i == 0 else MUTED,
                                font=(FONT, 8, "bold" if i == 0 else "normal"))
 
